@@ -1,6 +1,8 @@
 # music-ears
 
-Let llm without hearing function see music
+![music-ears](docs/promo.png)
+
+Let LLMs without ears see music
 
 让听不见声音的 AI "看见"一首歌：把歌拆开、量出来，写成一张给 AI 读的**乐谱卡**。
 
