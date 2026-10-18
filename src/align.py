@@ -1,6 +1,6 @@
 """自己唱的录音：听出唱的是哪几句，对上歌词（自己唱多半从中间、或挑几句唱，按第一句对齐会错位）。
 
-  python align.py 歌曲目录      要先有 measure.json（音符）和 lyric.json（网易云歌词）；写 lyric.aligned.lrc
+  python align.py 歌曲目录      要先有 measure.json（音符）和 lyric.json（网易云歌词）或 lyric.lrc；写 lyric.aligned.lrc
 
 做法：按音符之间的停顿把唱的切成一句句 → 每句交给语音识别（默认百炼 qwen3-asr-flash）认字 →
 跟歌词逐句比相似度（一句也可能正好跨两句歌词），往后找优先（多半顺着唱），够像才算 →
@@ -62,7 +62,11 @@ def plain(t):
 
 
 def lyric_lines(d):
-    raw = (json.load(open(os.path.join(d, "lyric.json"), encoding="utf-8")).get("lrc") or {}).get("lyric", "")
+    p = os.path.join(d, "lyric.json")
+    if os.path.exists(p):
+        raw = (json.load(open(p, encoding="utf-8")).get("lrc") or {}).get("lyric", "")
+    else:   # 别的平台的歌，用户自己给的 LRC
+        raw = open(os.path.join(d, "lyric.lrc"), encoding="utf-8").read()
     out = []
     for ln in raw.splitlines():
         text = re.sub(r"\[[^\]]*\]", "", ln).strip()
