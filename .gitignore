@@ -1,0 +1,8 @@
+venv/
+models/
+cache/
+test/synth/
+test/tempo/
+test/*.wav
+install.log
+__pycache__/

@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""music-ears：把一首歌拆开，写成乐谱卡。
+
+  music-ears 网易云链接或歌曲编号             取歌词和音频（免费歌直接下，会员歌要先扫码登录），量，写乐谱卡
+  music-ears 链接 --audio 录音.m4a            用自己的音频（比如会员歌的录屏），歌词照样从网易云取
+  music-ears 链接 --audio 录音.m4a --sung     自己唱的（卡上写"某某唱的"，模型知道在听你；先认出唱的是哪几句再对歌词）
+  music-ears --audio 录音.m4a [--name 歌名]   没有链接，只量音频
+  music-ears info 链接                        只认链接：歌名、歌手、是不是会员歌、做过没有（JSON）
+  music-ears list [--json]                    做过的歌
+  music-ears card 文件夹名                    打印某张卡
+  music-ears show 关键词                      打印某首的乐谱卡（歌名、歌手、编号都能搜）
+  music-ears login start | check KEY | me     网易云扫码登录（JSON）
+  music-ears vinyl playlists | tracks 歌单 | url 歌 | lyric 歌 | search 关键词    给播放器用（JSON）
+
+量的那步在 Docker 里跑（python:3.12-slim，挂上本目录的 venv 和 models）；听和审查调模型（src/listen.py）。
+一首 4 分钟的歌一共约 6–8 分钟。做过的歌直接拿缓存。设置见 src/config.py。
+"""
+import glob
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+HOME = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HOME, "src"))
+import card      # noqa: E402
+import config    # noqa: E402
+import netease   # noqa: E402
+
+CONF = config.load()
+if CONF.get("tz"):   # 记录时间用的时区（config.json 的 tz；不写就是系统时区）
+    os.environ["TZ"] = CONF["tz"]
+    time.tzset()
+CACHE = os.path.join(HOME, "cache")
+DOCKER = CONF["docker"]
+
+
+def to_wav(src, d):
+    dst = os.path.join(d, "audio.wav")
+    subprocess.run(["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@44100", src, dst], check=True)
+    return dst
+
+
+def measure(d):
+    rel = os.path.relpath(d, HOME)
+    r = subprocess.run([DOCKER, "run", "--rm", "-v", HOME + ":/w", "-e", "TORCH_HOME=/w/models/torch",
+                        "-e", "NUMBA_CACHE_DIR=/w/models/numba", "python:3.12-slim",
+                        "/w/venv/bin/python", "/w/src/measure.py", "/w/" + rel], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit("量的时候出错了：\n" + (r.stderr or r.stdout)[-800:])
+
+
+def analyze(link=None, audio=None, name=None, sung=False):
+    meta = {"made": time.strftime("%Y-%m-%d %H:%M")}
+    if link:
+        sid = netease.song_id(link)
+        meta.update(netease.info(sid))
+        # 发了录音的每次单独一份（自己唱的不能盖掉以前那份录屏）；只给链接的还是一首一份
+        d = os.path.join(CACHE, ("rec-%s-%s" % (sid, time.strftime("%Y%m%d-%H%M%S"))) if audio else sid)
+    else:
+        meta.update({"name": name or os.path.splitext(os.path.basename(audio))[0], "artists": []})
+        d = os.path.join(CACHE, "file-" + time.strftime("%Y%m%d-%H%M%S"))
+    if not audio:
+        recs = sorted(glob.glob(os.path.join(CACHE, "rec-%s*" % meta.get("id", ""), "meta.json")))
+        recs = [os.path.dirname(m) for m in recs if json.load(open(m, encoding="utf-8")).get("source") == "recording"]   # 自己唱的不算原曲
+        for c in [d] + recs[::-1]:   # 会员歌以前用录屏做过，也直接拿
+            if os.path.exists(os.path.join(c, "card.md")):
+                return os.path.join(c, "card.md"), True
+    os.makedirs(d, exist_ok=True)
+    if link:
+        json.dump(netease.lyric(meta["id"]), open(os.path.join(d, "lyric.json"), "w"), ensure_ascii=False)
+    if audio:
+        shutil.copy(audio, os.path.join(d, "source" + os.path.splitext(audio)[1]))
+        to_wav(audio, d)
+        meta["source"] = "sung" if sung else "recording"
+    else:
+        mp3 = os.path.join(d, "audio.mp3")
+        how = netease.download(meta["id"], mp3)
+        if not how:
+            shutil.rmtree(d, ignore_errors=True)
+            raise SystemExit("NEED_AUDIO 这首是会员歌，拿不到音频：先扫码登录（music-ears login），或者用 --audio 给一段录音")
+        to_wav(mp3, d)
+        meta["source"] = how
+    json.dump(meta, open(os.path.join(d, "meta.json"), "w"), ensure_ascii=False, indent=1)
+    measure(d)
+    if sung and link:   # 自己唱的：听出唱的是哪几句、对上歌词，再量一遍（分轨有缓存，第二遍快）
+        r = subprocess.run([sys.executable, os.path.join(HOME, "src", "align.py"), d], capture_output=True, text=True)
+        sys.stderr.write((r.stdout or r.stderr or "").strip()[-200:] + "\n")
+        if os.path.exists(os.path.join(d, "lyric.aligned.lrc")):
+            measure(d)
+    # 听 + 审查（模型）：出错不挡乐谱卡，只是卡里没有听感
+    r = subprocess.run([sys.executable, os.path.join(HOME, "src", "listen.py"), d], capture_output=True, text=True)
+    if r.returncode:
+        sys.stderr.write("听感没做成：" + (r.stderr or r.stdout)[-300:] + "\n")
+    return card.render(d), False
+
+
+def cards():
+    out = []
+    for m in glob.glob(os.path.join(CACHE, "*", "meta.json")):
+        d = os.path.dirname(m)
+        if os.path.exists(os.path.join(d, "card.md")):
+            meta = json.load(open(m, encoding="utf-8"))
+            out.append((meta.get("made", ""), meta, os.path.join(d, "card.md")))
+    return sorted(out, key=lambda x: x[0], reverse=True)
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return
+    if a[0] == "info":   # 只认链接：歌名、歌手、是不是会员歌、做过没有
+        try:
+            sid = netease.song_id(netease.find_link(" ".join(a[1:])) or a[1])
+            i = netease.info(sid)
+        except Exception as e:
+            print(json.dumps({"ok": False, "error": str(e)[:120]}, ensure_ascii=False))
+            return
+        i["cached"] = any(os.path.exists(os.path.join(CACHE, p + sid, "card.md")) for p in ("", "rec-"))
+        i["free_audio"] = netease.free_audio(sid)
+        i["login"] = bool(netease.cookie())   # 有登录信息，会员歌也能自己取
+        print(json.dumps(dict(i, ok=True), ensure_ascii=False))
+        return
+    if a[0] == "login":   # 扫码登录：login start → {key,url}；login check KEY → {code,msg}；login me → 账号
+        try:
+            if a[1:2] == ["start"]:
+                k, url = netease.qr_key(); print(json.dumps({"ok": True, "key": k, "url": url}))
+            elif a[1:2] == ["check"]:
+                code, msg = netease.qr_check(a[2]); print(json.dumps({"ok": True, "code": code, "msg": msg}, ensure_ascii=False))
+            else:
+                print(json.dumps({"ok": True, "me": netease.account()}, ensure_ascii=False))
+        except Exception as e:
+            print(json.dumps({"ok": False, "error": str(e)[:120]}, ensure_ascii=False))
+        return
+    if a[0] == "vinyl":   # 黑胶播放器：vinyl playlists | tracks 歌单 | url 歌 | lyric 歌 | search 关键词（都回 JSON）
+        try:
+            op, arg = a[1], " ".join(a[2:])
+            if op == "playlists":
+                out = {"playlists": netease.playlists()}
+            elif op == "tracks":
+                out = {"tracks": netease.tracks(arg)}
+            elif op == "url":
+                out = {"src": netease.song_url(arg)}
+            elif op == "lyric":
+                ly = netease.lyric(arg)
+                out = {"lrc": (ly.get("lrc") or {}).get("lyric", ""), "tlyric": (ly.get("tlyric") or {}).get("lyric", "")}
+            elif op == "search":
+                out = {"songs": netease.search(arg)}
+            else:
+                raise ValueError("不认识 " + op)
+            print(json.dumps(dict(out, ok=True), ensure_ascii=False))
+        except Exception as e:
+            print(json.dumps({"ok": False, "error": str(e)[:120]}, ensure_ascii=False))
+        return
+    if a[0] == "list":   # --json：给网页用
+        rows = [{"dir": os.path.basename(os.path.dirname(path)), "made": made, "name": meta.get("name", ""),
+                 "artists": meta.get("artists") or [], "sung": meta.get("source") == "sung"} for made, meta, path in cards()]
+        if "--json" in a:
+            print(json.dumps({"ok": True, "cards": rows}, ensure_ascii=False))
+            return
+        for r, (_, _, path) in zip(rows, cards()):
+            print("%s  %s《%s》%s  %s" % (r["made"], config.name() + "唱" if r["sung"] else "", r["name"],
+                                       ("（原唱 %s）" if r["sung"] else " — %s") % "/".join(r["artists"]) if r["artists"] else "", path))
+        return
+    if a[0] == "card":   # card 文件夹名 → 打印那张卡
+        p = os.path.join(CACHE, os.path.basename(a[1]), "card.md")
+        if not os.path.exists(p):
+            raise SystemExit("没有这张卡")
+        print(open(p, encoding="utf-8").read())
+        return
+    if a[0] == "show":
+        q = " ".join(a[1:]).lower()
+        hit = [c for c in cards() if q in (c[1].get("name", "") + " " + " ".join(c[1].get("artists") or []) + " " + str(c[1].get("id", ""))).lower()]
+        if not hit:
+            raise SystemExit("没找到：" + q)
+        print(open(hit[0][2], encoding="utf-8").read())
+        return
+    audio = name = None
+    if "--audio" in a:
+        i = a.index("--audio"); audio = a[i + 1]; a = a[:i] + a[i + 2:]
+    sung = "--sung" in a
+    a = [x for x in a if x != "--sung"]
+    if "--name" in a:
+        i = a.index("--name"); name = a[i + 1]; a = a[:i] + a[i + 2:]
+    link = netease.find_link(" ".join(a)) or (a[0] if a and a[0].isdigit() else None)
+    if not link and not audio:
+        raise SystemExit("要给网易云链接（或歌曲编号），或者 --audio 音频文件")
+    path, cached = analyze(link, audio, name, sung)
+    print(("（以前做过，直接拿的）" if cached else "") + path)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

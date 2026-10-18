@@ -1,0 +1,10 @@
+# 测量那一步（src/measure.py）要的库，装在 venv 里，作者用的版本：
+demucs==4.0.1
+librosa==1.0.0
+torch==2.14.1
+torchaudio==2.11.0
+torchcrepe==0.0.24
+numpy==2.5.4
+scipy==1.18.1
+soundfile==0.14.0
+# 其余（主程序、听和审查、网易云、乐谱卡）只用 Python 标准库
