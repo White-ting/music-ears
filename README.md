@@ -64,7 +64,7 @@ music-ears --audio 录音.m4a [--name 歌名] [--lrc 歌词.lrc]   没有网易�
 music-ears info 链接                        只看链接：歌名、歌手、是不是会员歌、做过没有
 music-ears list                             做过的歌
 music-ears show 关键词                      打印某首的乐谱卡
-music-ears serve                            黑胶播放器（网页）+ 一起听接口
+music-ears serve                            黑胶播放器（网页）+ 一起听接口 + MCP（/mcp）
 ```
 
 做过的歌会缓存在 `cache/`（不进仓库），再要就直接拿。
@@ -80,6 +80,10 @@ music-ears serve
 浏览器打开 <http://127.0.0.1:8790/> 就是一个黑胶播放器：你的网易云歌单、搜索、全屏歌词、锁屏控制。点歌右边的「⋯」→「一起听」，这首会先拆成乐谱卡，然后开始放；放的过程中，AI 读 `http://127.0.0.1:8790/api/now?format=text` 就知道你放到哪一句，还附上乐谱卡里前后十秒的旋律、和弦、唱法。
 
 手机上用、嵌进你自己的聊天前端、接给 AI，见 [docs/player.md](docs/player.md)。
+
+## 接给 AI（MCP）
+
+`music-ears serve` 同时是一个 MCP 服务（`/mcp`）：搜歌、拆歌、读卡、一起听。Claude Code、Claude Desktop、Claude 手机 App 的自定义连接器、Aru 都能接，怎么接见 [docs/mcp.md](docs/mcp.md)。
 
 ## 需要什么
 

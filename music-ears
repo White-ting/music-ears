@@ -12,7 +12,7 @@
   music-ears show 关键词                      打印某首的乐谱卡（歌名、歌手、编号都能搜）
   music-ears login start | check KEY | me     网易云扫码登录（JSON）
   music-ears vinyl playlists | tracks 歌单 | url 歌 | lyric 歌 | search 关键词    给播放器用（JSON）
-  music-ears serve [--host 127.0.0.1] [--port 8790] [--token 口令]       黑胶播放器网页 + 一起听接口（见 docs/player.md）
+  music-ears serve [--host 127.0.0.1] [--port 8790] [--token 口令]       黑胶播放器网页 + 一起听接口 + MCP（见 docs/player.md、docs/mcp.md）
 
 量的那步在 Docker 里跑（python:3.12-slim，挂上本目录的 venv 和 models）；听和审查调模型（src/listen.py）。
 一首 4 分钟的歌一共约 6–8 分钟。做过的歌直接拿缓存。设置见 src/config.py。

@@ -15,6 +15,7 @@
   GET  /api/listen?id=…                                       一起听的状态：making / ready / failed / none
   POST /api/pos {id, pos, dur, line, playing, ended|stop}      播放器报位置
   GET  /api/now[?format=text]                                 给 AI 的：现在放到哪 + 乐谱卡里前后十秒
+  POST /mcp                                                   MCP（streamable HTTP，只回 JSON）：搜歌、拆歌、读卡、一起听
 """
 import hashlib
 import http.cookies
@@ -69,8 +70,8 @@ _parsed = {}   # card.md → (mtime, 段落听感 [(起, 止, 字)], 逐句 [(�
 
 
 def card_sections(sid):
-    """读乐谱卡「逐句」那节：段落听感和逐句。"""
-    path = card_path(sid)
+    """读乐谱卡「逐句」那节：段落听感和逐句。sid 也可以直接给 card.md 的路径。"""
+    path = sid if str(sid).endswith("card.md") and os.path.isfile(sid) else card_path(sid)
     if not path:
         return None
     mt = os.path.getmtime(path)
@@ -181,6 +182,147 @@ def start_job(sid):
     threading.Thread(target=go, daemon=True).start()
 
 
+# ---------- MCP：给能接工具的 AI（Aru、Claude App 的自定义连接器、Claude Code……） ----------
+
+MCP_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+MCP_INSTRUCTIONS = (
+    "music-ears 把歌拆成给 AI 读的乐谱卡（调、拍速、和弦、逐句简谱、换气、长音、颤音，加上模型听的听感）。"
+    "用户想跟你聊一首歌：先 search_song 找到编号；list_cards 看拆没拆过；没拆过 make_card（要 5–8 分钟，过几分钟再 get_card）。"
+    "get_card 读整张卡，或者给 at（比如 1:20）只读那一段。"
+    "用户在黑胶播放器里点了「一起听」时，now_playing 告诉你放到哪一句，以及乐谱卡里前后十秒的内容。"
+    "卡里的数字是脚本量的，滑音、合唱、童声会冒出不存在的调外音，拿不准就说拿不准。")
+
+MCP_TOOLS = [
+    {"name": "search_song", "description": "在网易云搜歌。返回编号、歌名、歌手、专辑、时长，编号给别的工具用。",
+     "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "歌名、歌手"},
+                                                       "limit": {"type": "integer", "description": "最多几首，默认 8"}},
+                     "required": ["query"]}},
+    {"name": "list_cards", "description": "已经拆过（有乐谱卡）的歌。",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "make_card", "description": "开始拆一首歌、写乐谱卡。要 5–8 分钟，立刻返回；过几分钟用 get_card 看好了没有。",
+     "inputSchema": {"type": "object", "properties": {"song": {"type": "string", "description": "网易云歌曲编号或链接"}},
+                     "required": ["song"]}},
+    {"name": "get_card", "description": "读一首歌的乐谱卡。不给 at 就是整张；给 at（比如 \"1:20\" 或秒数）只回卡头和那个时间前后 span 秒的逐句。",
+     "inputSchema": {"type": "object", "properties": {"song": {"type": "string", "description": "网易云歌曲编号、链接，或 list_cards 里的文件夹名、歌名"},
+                                                       "at": {"type": "string", "description": "只看这个时间附近，比如 1:20"},
+                                                       "span": {"type": "integer", "description": "at 前后各几秒，默认 20"}},
+                     "required": ["song"]}},
+    {"name": "now_playing", "description": "一起听：用户在黑胶播放器里放到哪一句，附上乐谱卡里前后十秒的旋律、和弦、听感。没在一起听就说没有。",
+     "inputSchema": {"type": "object", "properties": {}}},
+]
+
+
+def _sid(song):
+    import netease
+    song = str(song or "").strip()
+    if re.match(r"^\d{3,}$", song):
+        return song
+    link = netease.find_link(song)
+    return netease.song_id(link) if link else ""
+
+
+def _card_dir(song):
+    """编号 / 链接 → 卡的文件夹；也认 list_cards 里的文件夹名、歌名。"""
+    song = str(song or "").strip()
+    sid = _sid(song)
+    if sid and card_path(sid):
+        return os.path.dirname(card_path(sid)), sid
+    if song and os.path.isfile(os.path.join(CACHE, os.path.basename(song), "card.md")):
+        return os.path.join(CACHE, os.path.basename(song)), sid
+    for c in (cli_json("list", "--json").get("cards") or []):
+        if song and song in c.get("name", ""):
+            return os.path.join(CACHE, c["dir"]), sid
+    return None, sid
+
+
+def _secs(t):
+    t = str(t).strip()
+    if ":" in t:
+        m, s = t.split(":", 1)
+        return int(m) * 60 + float(s)
+    return float(t)
+
+
+def mcp_call(name, a):
+    if name == "search_song":
+        d = cli_json("vinyl", "search", str(a.get("query") or ""))
+        if not d.get("ok"):
+            raise ValueError(d.get("error") or "没搜到")
+        songs = (d.get("songs") or [])[:max(1, min(30, int(a.get("limit") or 8)))]
+        if not songs:
+            return "没搜到。"
+        fmt = lambda t: "%d:%02d" % (int(t) // 60, int(t) % 60)
+        return "\n".join("%s ｜ %s — %s ｜ %s ｜ %s" % (x["id"], x["name"], " / ".join(x.get("artists") or []), x.get("album", ""), fmt(x.get("dur") or 0))
+                         for x in songs)
+    if name == "list_cards":
+        rows = cli_json("list", "--json").get("cards") or []
+        if not rows:
+            return "还没拆过歌。"
+        return "\n".join("%s ｜ %s%s ｜ %s" % (r["dir"], "（%s唱的）" % config.name() if r.get("sung") else "", r["name"]
+                                              + (" — " + " / ".join(r["artists"]) if r.get("artists") and not r.get("sung") else ""), r.get("made", ""))
+                         for r in rows)
+    if name == "make_card":
+        sid = _sid(a.get("song"))
+        if not sid:
+            raise ValueError("要网易云歌曲编号或链接（先用 search_song 找编号）")
+        if card_path(sid):
+            return "这首拆过了，直接 get_card。"
+        if JOBS.get(sid) == "making":
+            return "这首正在拆，过几分钟再 get_card。"
+        i = cli_json("info", sid)
+        if i.get("ok") and not i.get("free_audio") and not i.get("login"):
+            raise ValueError("《%s》是会员歌，拿不到音频：先在播放器里扫码登录网易云会员号" % i.get("name", sid))
+        start_job(sid)
+        return "开始拆《%s》了，约 5–8 分钟。过几分钟用 get_card 看。" % (i.get("name") or sid)
+    if name == "get_card":
+        d, sid = _card_dir(a.get("song"))
+        if not d:
+            if sid and JOBS.get(sid) == "making":
+                return "还在拆，再等几分钟。"
+            if sid and JOBS.get(sid) == "failed":
+                raise ValueError("这首没拆成（看跑 music-ears serve 的那个窗口里的报错）")
+            raise ValueError("没有这首的卡：先 make_card")
+        text = open(os.path.join(d, "card.md"), encoding="utf-8").read()
+        if not a.get("at"):
+            return text
+        at, span = _secs(a["at"]), int(a.get("span") or 20)
+        head = text.split("\n## 逐句", 1)[0].strip()
+        win = window(os.path.join(d, "card.md"), at, span)
+        return head + "\n\n## %s 前后 %d 秒\n" % (a["at"], span) + ("\n".join(win) if win else "（这段没有逐句内容）")
+    if name == "now_playing":
+        info = now_info()
+        return info["text"] if info else "现在没在一起听（用户要在黑胶播放器里点「一起听」）。"
+    raise KeyError(name)
+
+
+def mcp_handle(msg):
+    """一条 JSON-RPC。通知（没有 id）回 None。"""
+    mid, method, params = msg.get("id"), msg.get("method"), msg.get("params") or {}
+    if mid is None:
+        return None
+    ok = lambda r: {"jsonrpc": "2.0", "id": mid, "result": r}
+    err = lambda code, m: {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": m}}
+    if method == "initialize":
+        want = params.get("protocolVersion")
+        return ok({"protocolVersion": want if want in MCP_VERSIONS else MCP_VERSIONS[0],
+                   "capabilities": {"tools": {"listChanged": False}},
+                   "serverInfo": {"name": "music-ears", "version": "0.2"},
+                   "instructions": MCP_INSTRUCTIONS})
+    if method == "ping":
+        return ok({})
+    if method == "tools/list":
+        return ok({"tools": MCP_TOOLS})
+    if method == "tools/call":
+        try:
+            text = mcp_call(params.get("name"), params.get("arguments") or {})
+            return ok({"content": [{"type": "text", "text": text}], "isError": False})
+        except KeyError:
+            return err(-32602, "没有这个工具：%s" % params.get("name"))
+        except Exception as e:
+            return ok({"content": [{"type": "text", "text": "出错了：%s" % e}], "isError": True})
+    return err(-32601, "不支持 %s" % method)
+
+
 class H(BaseHTTPRequestHandler):
     server_version = "music-ears"
 
@@ -216,6 +358,21 @@ class H(BaseHTTPRequestHandler):
         p = u.path.lstrip("/") or "index.html"
         if not self.authed(q):
             return self.json({"ok": False, "error": "要口令：第一次打开时在地址后面加 ?key=口令"}, 401)
+        if p == "mcp":
+            if method != "POST":
+                return self.send(405, "text/plain; charset=utf-8", "MCP 只收 POST（不开 SSE）".encode(), {"Allow": "POST"})
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                msg = json.loads(self.rfile.read(min(n, 1 << 20)) or b"null")
+            except ValueError:
+                return self.json({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "不是 JSON"}}, 400)
+            out = [r for r in (mcp_handle(m) for m in msg) if r] if isinstance(msg, list) else mcp_handle(msg if isinstance(msg, dict) else {})
+            if not out:
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self.json(out)
         body = {}
         if method == "POST":
             n = int(self.headers.get("Content-Length") or 0)
