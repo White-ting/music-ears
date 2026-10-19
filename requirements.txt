@@ -7,4 +7,5 @@ torchcrepe==0.0.24
 numpy==2.5.4
 scipy==1.18.1
 soundfile==0.14.0
+av==19.0.1        # 不是 macOS 才用到：转音频格式（mp3、m4a…→ wav），macOS 用系统自带的 afconvert
 # 其余（主程序、听和审查、网易云、乐谱卡）只用 Python 标准库

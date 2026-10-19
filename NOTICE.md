@@ -12,6 +12,13 @@ music-ears 本身不包含下面这些库和模型的代码或权重，运行时
 | [SciPy](https://github.com/scipy/scipy) | 信号处理 | BSD-3-Clause |
 | [python-soundfile](https://github.com/bastibe/python-soundfile) | 读写 wav | BSD-3-Clause |
 
+黑胶播放器网页（web/）里带着的：
+
+| 名称 | 用途 | 许可证 |
+|---|---|---|
+| [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) 1.4.4（web/qrcode.min.js，原样附带） | 网易云扫码登录的二维码 | MIT，© Kazuhiko Arase |
+| [Lucide](https://lucide.dev) 图标（web/vinyl.js 里的几个 SVG 路径） | 播放、暂停、搜索等图标 | ISC |
+
 调用的在线模型（通义千问 Omni、Gemini）按各自服务商的条款使用，需要使用者自己的钥匙。
 
 网易云音乐相关的接口不是官方公开接口，见 README 里的说明。

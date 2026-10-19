@@ -49,6 +49,8 @@ def render(d):
     lis = None
     if os.path.exists(os.path.join(d, "listen.json")):
         lis = json.load(open(os.path.join(d, "listen.json"), encoding="utf-8"))
+        if lis.get("skipped"):
+            out.append("- 没有听感：%s。这张卡只有脚本量的数字；配好钥匙后删掉这首的缓存文件夹再做一次，就有模型听的部分" % lis["skipped"].split("：")[0])
         if lis.get("summary"):
             out.append("- 整体听感（%s 听，%s 逐段重听审查）：%s" % (lis["listen_model"], lis["review_model"], lis["summary"].replace("\n", " ")))
     if m.get("lyric_by_ear"):
@@ -62,7 +64,7 @@ def render(d):
     seg_at = {}       # 每段从哪句开始 → 那段
     line_note = {}    # 每句的听感点评
     if lis:
-        for sg in lis["segments"]:
+        for sg in lis.get("segments") or []:
             if sg["lines"]:
                 seg_at[sg["lines"][0]] = sg
             for x in (sg["heard"].get("lines") or []) if isinstance(sg["heard"], dict) else []:

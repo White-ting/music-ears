@@ -6,7 +6,9 @@ Let LLMs without ears see music
 
 让听不见声音的 AI "看见"一首歌：把歌拆开、量出来，写成一张给 AI 读的**乐谱卡**。
 
-> **整理中**：现在这份是作者自己机器上在用的版本，路径、模型钥匙的位置还写死在代码里，暂时不能装上就用。整理成通用版以前，先当参考看。
+> 作者在 macOS 上用；Linux、Windows 走 Docker 里的转码，测过转码那一步，整套流程还没在别的系统上从头跑过。
+
+先看一眼：[乐谱卡长这样](docs/example-card.md)。
 
 ## 适合什么场景
 
@@ -57,29 +59,38 @@ music-ears 要跑在电脑上（需要 Docker 和 Python），手机 App 里的 
 music-ears 网易云链接或歌曲编号             取歌词和音频，量，写乐谱卡
 music-ears 链接 --audio 录音.m4a            用自己的音频（比如会员歌的录屏），歌词照样从网易云取
 music-ears 链接 --audio 录音.m4a --sung     自己唱的
+music-ears 链接 --no-listen                 只量不听：不调模型、不要钥匙
 music-ears --audio 录音.m4a [--name 歌名] [--lrc 歌词.lrc]   没有网易云链接：量音频，给了 LRC 歌词就逐句对上
 music-ears info 链接                        只看链接：歌名、歌手、是不是会员歌、做过没有
 music-ears list                             做过的歌
 music-ears show 关键词                      打印某首的乐谱卡
+music-ears serve                            黑胶播放器（网页）+ 一起听接口
 ```
 
 做过的歌会缓存在 `cache/`（不进仓库），再要就直接拿。
 
-还有给播放器用的几条（网易云扫码登录、歌单、搜索、播放地址、歌词，都回 JSON），见下一节。
+还有给播放器用的几条（网易云扫码登录、歌单、搜索、播放地址、歌词，都回 JSON），播放器本身见下一节。
 
 ## 黑胶播放器和一起听
 
-作者自己的版本里，music-ears 外面套了一个黑胶播放器，能和 AI 一起听歌：歌放到哪，AI 就"听"到哪（每次说话附上乐谱卡里前后十秒的内容）。播放器暂时拆不出来单独放出，怎么用、怎么在你自己的前端里接一个，写在 [docs/player.md](docs/player.md)。
+```
+music-ears serve
+```
+
+浏览器打开 <http://127.0.0.1:8790/> 就是一个黑胶播放器：你的网易云歌单、搜索、全屏歌词、锁屏控制。点歌右边的「⋯」→「一起听」，这首会先拆成乐谱卡，然后开始放；放的过程中，AI 读 `http://127.0.0.1:8790/api/now?format=text` 就知道你放到哪一句，还附上乐谱卡里前后十秒的旋律、和弦、唱法。
+
+手机上用、嵌进你自己的聊天前端、接给 AI，见 [docs/player.md](docs/player.md)。
 
 ## 需要什么
 
-- **macOS**：转音频格式用的是系统自带的 `afconvert`（以后可能换成 ffmpeg，就能在别的系统跑）；
+- **系统**：macOS 转音频用系统自带的 `afconvert`；Linux、Windows 在 Docker 容器里用 PyAV（自带 ffmpeg 解码器）转，要在 venv 里装上 `av`（已写进 requirements.txt）；
 - **Docker**：测量那一步放在 `python:3.12-slim` 容器里跑，代码和环境从本目录挂进去；
 - **Python 库**：见 `requirements.txt`（demucs、librosa、torch、torchcrepe 等，只有测量要）；
 - **模型钥匙**（三个，都可以在设置里换成别家）：
   - **听**：能输入音频的模型，OpenAI 兼容格式，默认阿里云百炼的通义千问 Omni；
   - **审查**：Gemini 原生格式（有些中转的 OpenAI 格式会把音频丢掉）；
   - **认字**：只有听自己唱的（`--sung`）才用，默认百炼的 qwen3-asr-flash。
+- **没有钥匙也能先试**：不配钥匙（或者加 `--no-listen`）就只量不听，卡里有调、拍速、和弦、逐句旋律，没有模型写的听感。
 
 ## 安装
 
@@ -143,7 +154,7 @@ music-ears --audio 录音.m4a --name "歌名" --lrc 歌词.lrc
 
 ## 已知的不足
 
-- 只能在 macOS 上跑（转音频用的 `afconvert`）。
+- 主要在 macOS 上用过；Linux、Windows 只测过转音频那一步。
 - 一首 4 分钟的歌要 6–8 分钟，大头是分轨和逐段请模型听。
 - 量出来的数会错：滑音会被切成一个短音、合唱和童声会冒出不存在的调外音，乐谱卡里也写明了这一点。
 - 录音要从歌的开头录，从中间开始录的对不上歌词（自己唱的除外，会先认字再对）。
@@ -156,7 +167,7 @@ music-ears --audio 录音.m4a --name "歌名" --lrc 歌词.lrc
 1. **跑的命令**：比如 `music-ears 链接 --audio 录音.m4a`；
 2. **出了什么事**：报错的最后几行原文，或者乐谱卡里哪一段不对（贴那几行）；
 3. **是哪首歌**：网易云链接，或者歌名和歌手；是不是会员歌、是不是自己唱的；
-4. **环境**：macOS 版本、Docker 用的是什么（Docker Desktop、OrbStack……）。
+4. **环境**：什么系统、哪个版本，Docker 用的是什么（Docker Desktop、OrbStack……）。
 
 **别贴**：钥匙、`~/.config/music-ears/` 里的文件、网易云的登录信息（netease-cookie），这些都是你的私人凭证。
 

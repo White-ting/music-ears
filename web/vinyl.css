@@ -1,0 +1,135 @@
+/* music-ears 黑胶播放器。所有样式都挂在 .mev 下面，嵌进别的网页不会互相干扰。
+   背景是这首歌的封面放大、模糊、压暗；中间唱片，点一下变全屏歌词；下面细进度条 + 玻璃播放键。 */
+.mev, .mev * { box-sizing: border-box; }
+.mev { --mev-accent: #e8936f; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased; }
+.mev button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.mev svg.ic { width: 22px; height: 22px; display: block; }
+.mev [hidden] { display: none !important; }
+
+/* 播放页：盖满整个窗口 */
+.mev-sheet { position: fixed; inset: 0; z-index: 2147483000; background: #121110; color: #fff; overflow: hidden;
+  display: flex; flex-direction: column; transform: translateY(0); transition: transform .32s cubic-bezier(.3,.9,.3,1); }
+.mev-sheet.off { transform: translateY(102%); pointer-events: none; }
+.mev-sheet > :not(.mev-bg) { position: relative; z-index: 1; }
+.mev-bg { position: absolute; inset: -12%; z-index: 0; background: #2a2522 center / cover no-repeat; transition: background-image .6s ease;
+  filter: blur(70px) saturate(1.5) brightness(.5); transform: scale(1.15); pointer-events: none; }
+.mev-bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.45)); }
+
+.mev-head { flex: none; display: flex; align-items: center; gap: 8px; padding: calc(10px + env(safe-area-inset-top)) 10px 6px; }
+.mev-hbtn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: rgba(255,255,255,.9); flex: none; }
+.mev-hbtn:active { background: rgba(255,255,255,.08); }
+.mev-ht { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.mev-ht b { font-size: 17px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mev-ht span { font-size: 12.5px; opacity: .6; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mev-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 26px calc(18px + env(safe-area-inset-bottom)); }
+.mev-main { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; }
+.mev-main.lyr .mev-stage, .mev-main:not(.lyr) .mev-lyric { display: none; }
+.mev-stage { position: relative; width: min(76vw, 320px, 52vh); aspect-ratio: 1; margin-top: -4vh; }
+.mev-disc { position: absolute; inset: 0; border-radius: 50%;
+  background: repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,.035) 0 .8px, transparent 1.2px 3px), radial-gradient(circle, #1b1b1b 0, #090909 72%);
+  box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.07), inset 0 0 0 8px rgba(0,0,0,.6);
+  animation: mevSpin 18s linear infinite; animation-play-state: paused; }
+.mev-disc::after { content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from 200deg, transparent 0 12%, rgba(255,255,255,.06) 17%, transparent 24% 62%, rgba(255,255,255,.04) 67%, transparent 74%); }
+.mev-disc.on { animation-play-state: running; }
+.mev-cover { position: absolute; left: 18%; top: 18%; width: 64%; height: 64%; border-radius: 50%; object-fit: cover; background: #3a322d;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.4); pointer-events: none; -webkit-user-drag: none; }
+.mev-cover:not([src]), .mev-cover[src=""] { visibility: hidden; }
+@keyframes mevSpin { to { transform: rotate(360deg); } }
+.mev-arm { position: absolute; left: 50%; top: -15%; width: 3px; height: 40%; margin-left: 12px; border-radius: 3px;
+  background: linear-gradient(rgba(255,255,255,.9), rgba(255,255,255,.55)); transform-origin: 50% 3%; transform: rotate(-28deg);
+  transition: transform .7s cubic-bezier(.3,1.25,.55,1); box-shadow: 0 4px 10px rgba(0,0,0,.35); }
+.mev-arm::before { content: ""; position: absolute; left: -6px; top: -6px; width: 15px; height: 15px; border-radius: 50%; background: rgba(255,255,255,.92); }
+.mev-arm::after { content: ""; position: absolute; left: -3px; bottom: -4px; width: 9px; height: 14px; border-radius: 2px; background: rgba(255,255,255,.85); }
+.mev-arm.on { transform: rotate(-4deg); }
+
+/* 全屏歌词：当前句居中变亮变大，能手滑（5 秒后滚回） */
+.mev-lyric { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; text-align: center;
+  mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); }
+.mev-lyric::-webkit-scrollbar { display: none; }
+.mev-lyric .in { padding: 45% 4px; }
+.mev-lyric .ln { font-size: 17px; line-height: 1.45; margin: 0 0 18px; color: rgba(255,255,255,.42); transition: color .3s, transform .3s; }
+.mev-lyric .ln small { display: block; font-size: 13px; margin-top: 3px; color: inherit; opacity: .85; }
+.mev-lyric .ln.cur { color: #fff; font-weight: 600; transform: scale(1.06); }
+
+.mev-bar { display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: rgba(255,255,255,.6); font-variant-numeric: tabular-nums; margin-top: 8px; }
+.mev-bar input { flex: 1; -webkit-appearance: none; appearance: none; height: 18px; background: transparent; margin: 0; }
+.mev-bar input::-webkit-slider-runnable-track { height: 3px; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(255,255,255,.9) var(--p, 0%), rgba(255,255,255,.22) var(--p, 0%)); }
+.mev-bar input::-moz-range-track { height: 3px; border-radius: 3px; background: rgba(255,255,255,.22); }
+.mev-bar input::-moz-range-progress { height: 3px; border-radius: 3px; background: rgba(255,255,255,.9); }
+.mev-bar input::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; margin-top: -4px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.mev-bar input::-moz-range-thumb { width: 11px; height: 11px; border: 0; border-radius: 50%; background: #fff; }
+.mev-ctl { display: flex; align-items: center; justify-content: center; gap: 48px; margin: 14px 0 4px; }
+.mev-ctl button { color: rgba(255,255,255,.92); width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
+.mev-ctl button svg.ic { width: 26px; height: 26px; }
+.mev-ctl .big { width: 70px; height: 70px; border-radius: 50%; color: #fff; background: rgba(255,255,255,.14);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.mev-ctl .big svg.ic { width: 28px; height: 28px; }
+
+/* 歌单 / 搜索 / 正在放 */
+.mev-lib { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 4px 18px 0; }
+.mev-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex: none; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.08); }
+.mev-tabs button { flex: 1; padding: 8px 0; border-radius: 999px; color: rgba(255,255,255,.75); font-size: 14px; }
+.mev-tabs button.on { background: rgba(255,255,255,.9); color: #151312; font-weight: 600; }
+.mev-search { flex: none; display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 0 16px; height: 44px; border-radius: 999px;
+  background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+.mev-search svg.ic { width: 18px; height: 18px; opacity: .6; flex: none; }
+.mev-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: #fff; font: inherit; font-size: 16px; -webkit-appearance: none; }
+.mev-search input::placeholder { color: rgba(255,255,255,.4); }
+.mev-search input::-webkit-search-cancel-button { display: none; }
+.mev-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+.mev-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 4px; text-align: left; color: #fff; border-radius: 12px; }
+.mev-item:active { background: rgba(255,255,255,.08); }
+.mev-item img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: rgba(255,255,255,.08); flex: none; }
+.mev-item .t { flex: 1; min-width: 0; }
+.mev-item .t b { display: block; font-weight: 500; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mev-item .t span { display: block; font-size: 12.5px; opacity: .55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mev-item.cur b { color: #f6c9b4; }
+.mev-more { flex: none; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; opacity: .6; margin-right: -4px; }
+.mev-note { opacity: .55; font-size: 13px; padding: 12px 4px; line-height: 1.6; }
+.mev-note button { text-decoration: underline; opacity: 1; color: #fff; }
+
+/* "⋯" 弹出来的小菜单 */
+.mev-menu { position: fixed; z-index: 2147483002; min-width: 168px; padding: 6px; border-radius: 16px; color: #fff;
+  background: rgba(44,40,38,.94); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  box-shadow: 0 12px 40px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.08); }
+.mev-menu button { display: block; width: 100%; text-align: left; padding: 11px 14px; border-radius: 10px; font-size: 15px; }
+.mev-menu button:active { background: rgba(255,255,255,.1); }
+
+/* 网易云扫码登录 */
+.mev-sheet > .mev-login { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,.55); }
+.mev-login .box { width: min(340px, 100%); padding: 22px 20px 18px; border-radius: 22px; color: #1d1b1a; background: #f6f2ee; text-align: center; }
+.mev-login h3 { margin: 0 0 12px; font-size: 17px; }
+.mev-login .qr { display: flex; justify-content: center; align-items: center; min-height: 200px; margin-bottom: 8px; }
+.mev-login .qr svg { width: 200px; height: 200px; }
+.mev-login p { margin: 6px 0; font-size: 13px; line-height: 1.6; color: #5a524d; }
+.mev-login .row { display: flex; gap: 8px; margin-top: 12px; }
+.mev-login .row a, .mev-login .row button { flex: 1; padding: 11px 0; border-radius: 12px; font-size: 14px; text-decoration: none; }
+.mev-login .row a { background: #1d1b1a; color: #fff; }
+.mev-login .row button { background: rgba(0,0,0,.07); color: #1d1b1a; }
+
+/* 底部一行提示 */
+.mev-toast { position: fixed; left: 50%; bottom: calc(110px + env(safe-area-inset-bottom)); transform: translate(-50%, 8px); z-index: 2147483003;
+  max-width: calc(100vw - 40px); padding: 9px 16px; border-radius: 999px; font-size: 13.5px; color: #fff; background: rgba(30,28,26,.92);
+  box-shadow: 0 6px 24px rgba(0,0,0,.35); opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none; }
+.mev-toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* 缩小后的小唱片：能拖，松手贴边；点一下放大；长按冒出 关掉 / 一起听 */
+.mev-mini { position: fixed; right: 14px; bottom: calc(110px + env(safe-area-inset-bottom)); width: 62px; height: 62px; z-index: 2147482999; touch-action: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; cursor: pointer; }
+.mev-mini .mev-disc { box-shadow: 0 6px 18px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.08); transition: transform .2s; }
+.mev-mini.closing .mev-disc { transform: scale(.92); }
+.mev-mini .x, .mev-mini .l { position: absolute; top: -6px; width: 26px; height: 26px; border-radius: 50%; display: none;
+  align-items: center; justify-content: center; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.15); }
+.mev-mini .x { left: -6px; background: rgba(40,36,34,.92); }
+.mev-mini .l { right: -6px; background: var(--mev-accent); }
+.mev-mini .x svg.ic, .mev-mini .l svg.ic { width: 14px; height: 14px; }
+.mev-mini.closing .x, .mev-mini.closing .l { display: flex; }
+
+/* 宽屏：播放页居中一列，别拉得太宽 */
+@media (min-width: 720px) {
+  .mev-body, .mev-lib { width: 100%; max-width: 560px; margin: 0 auto; }
+}

@@ -3,6 +3,7 @@
 
   music-ears 网易云链接或歌曲编号             取歌词和音频（免费歌直接下，会员歌要先扫码登录），量，写乐谱卡
   music-ears 链接 --audio 录音.m4a            用自己的音频（比如会员歌的录屏），歌词照样从网易云取
+  music-ears 链接 --no-listen                 只量不听：不调模型、不要钥匙（没配钥匙时自动这样）
   music-ears 链接 --audio 录音.m4a --sung     自己唱的（卡上写"某某唱的"，模型知道在听你；先认出唱的是哪几句再对歌词）
   music-ears --audio 录音.m4a [--name 歌名] [--lrc 歌词.lrc]   没有网易云链接（QQ 音乐等别的平台的歌）：量音频，给了 LRC 歌词就逐句对上
   music-ears info 链接                        只认链接：歌名、歌手、是不是会员歌、做过没有（JSON）
@@ -11,6 +12,7 @@
   music-ears show 关键词                      打印某首的乐谱卡（歌名、歌手、编号都能搜）
   music-ears login start | check KEY | me     网易云扫码登录（JSON）
   music-ears vinyl playlists | tracks 歌单 | url 歌 | lyric 歌 | search 关键词    给播放器用（JSON）
+  music-ears serve [--host 127.0.0.1] [--port 8790] [--token 口令]       黑胶播放器网页 + 一起听接口（见 docs/player.md）
 
 量的那步在 Docker 里跑（python:3.12-slim，挂上本目录的 venv 和 models）；听和审查调模型（src/listen.py）。
 一首 4 分钟的歌一共约 6–8 分钟。做过的歌直接拿缓存。设置见 src/config.py。
@@ -38,9 +40,26 @@ DOCKER = CONF["docker"]
 
 
 def to_wav(src, d):
+    """转成 44.1k 16 位 wav。macOS 用系统自带的 afconvert；别的系统在容器里用 PyAV（自带 ffmpeg）转。src 要在 d 里面。"""
     dst = os.path.join(d, "audio.wav")
-    subprocess.run(["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@44100", src, dst], check=True)
+    if sys.platform == "darwin" and os.path.exists("/usr/bin/afconvert") and not os.environ.get("MUSIC_EARS_NO_AFCONVERT"):
+        subprocess.run(["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@44100", src, dst], check=True)
+        return dst
+    r = subprocess.run([DOCKER, "run", "--rm", "-v", HOME + ":/w", "python:3.12-slim", "/w/venv/bin/python", "/w/src/convert.py",
+                        "/w/" + os.path.relpath(src, HOME), "/w/" + os.path.relpath(dst, HOME)], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit("转音频格式时出错了：\n" + (r.stderr or r.stdout)[-600:])
     return dst
+
+
+def listen_ready():
+    """听和审查的钥匙都在吗。不在就回原因（没钥匙也能出卡，只是没有听感）。"""
+    try:
+        config.model("listen")
+        config.model("review")
+        return ""
+    except SystemExit as e:
+        return str(e)
 
 
 def measure(d):
@@ -52,7 +71,7 @@ def measure(d):
         raise SystemExit("量的时候出错了：\n" + (r.stderr or r.stdout)[-800:])
 
 
-def analyze(link=None, audio=None, name=None, sung=False, lrc=None):
+def analyze(link=None, audio=None, name=None, sung=False, lrc=None, listen=True):
     meta = {"made": time.strftime("%Y-%m-%d %H:%M")}
     if link:
         sid = netease.song_id(link)
@@ -74,8 +93,9 @@ def analyze(link=None, audio=None, name=None, sung=False, lrc=None):
     elif lrc:   # 别的平台的歌：自己给 LRC 歌词
         shutil.copy(lrc, os.path.join(d, "lyric.lrc"))
     if audio:
-        shutil.copy(audio, os.path.join(d, "source" + os.path.splitext(audio)[1]))
-        to_wav(audio, d)
+        src = os.path.join(d, "source" + os.path.splitext(audio)[1])
+        shutil.copy(audio, src)
+        to_wav(src, d)
         meta["source"] = "sung" if sung else "recording"
     else:
         mp3 = os.path.join(d, "audio.mp3")
@@ -93,9 +113,14 @@ def analyze(link=None, audio=None, name=None, sung=False, lrc=None):
         if os.path.exists(os.path.join(d, "lyric.aligned.lrc")):
             measure(d)
     # 听 + 审查（模型）：出错不挡乐谱卡，只是卡里没有听感
-    r = subprocess.run([sys.executable, os.path.join(HOME, "src", "listen.py"), d], capture_output=True, text=True)
-    if r.returncode:
-        sys.stderr.write("听感没做成：" + (r.stderr or r.stdout)[-300:] + "\n")
+    why = "加了 --no-listen" if not listen else listen_ready()
+    if why:
+        sys.stderr.write("这张卡只有测量、没有听感（%s）。\n" % why)
+        json.dump({"skipped": why}, open(os.path.join(d, "listen.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    else:
+        r = subprocess.run([sys.executable, os.path.join(HOME, "src", "listen.py"), d], capture_output=True, text=True)
+        if r.returncode:
+            sys.stderr.write("听感没做成：" + (r.stderr or r.stdout)[-300:] + "\n")
     return card.render(d), False
 
 
@@ -156,6 +181,10 @@ def main(a):
         except Exception as e:
             print(json.dumps({"ok": False, "error": str(e)[:120]}, ensure_ascii=False))
         return
+    if a[0] == "serve":   # 黑胶播放器：网页 + 接口（src/serve.py）
+        import serve
+        serve.main(a[1:])
+        return
     if a[0] == "list":   # --json：给网页用
         rows = [{"dir": os.path.basename(os.path.dirname(path)), "made": made, "name": meta.get("name", ""),
                  "artists": meta.get("artists") or [], "sung": meta.get("source") == "sung"} for made, meta, path in cards()]
@@ -183,7 +212,8 @@ def main(a):
     if "--audio" in a:
         i = a.index("--audio"); audio = a[i + 1]; a = a[:i] + a[i + 2:]
     sung = "--sung" in a
-    a = [x for x in a if x != "--sung"]
+    listen = "--no-listen" not in a
+    a = [x for x in a if x not in ("--sung", "--no-listen")]
     if "--name" in a:
         i = a.index("--name"); name = a[i + 1]; a = a[:i] + a[i + 2:]
     lrc = None
@@ -194,7 +224,7 @@ def main(a):
     link = netease.find_link(" ".join(a)) or (a[0] if a and a[0].isdigit() else None)
     if not link and not audio:
         raise SystemExit("要给网易云链接（或歌曲编号），或者 --audio 音频文件")
-    path, cached = analyze(link, audio, name, sung, None if link else lrc)
+    path, cached = analyze(link, audio, name, sung, None if link else lrc, listen)
     print(("（以前做过，直接拿的）" if cached else "") + path)
 
 

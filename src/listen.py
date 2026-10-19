@@ -1,4 +1,4 @@
-"""music-ears 第二、三层：模型"听" + 审查。只用标准库，在 Mac 上跑（切音频用系统的 afconvert）。
+"""music-ears 第二、三层：模型"听" + 审查。只用标准库（切音频：macOS 用系统的 afconvert，别的系统纯 Python 降采样）。
 
   python listen.py 歌曲目录        要先有 measure.json；写 listen.json（每段听感 + 审查）
 
@@ -10,6 +10,7 @@
 模型和钥匙在 ~/.config/music-ears/config.json 里设（见 config.py）。
 """
 import base64
+import io
 import json
 import os
 import re
@@ -91,8 +92,36 @@ def cut(wav_path, a, b):
         raw, small = os.path.join(td, "a.wav"), os.path.join(td, "b.wav")
         with wave.open(raw, "wb") as o:
             o.setnchannels(ch); o.setsampwidth(sw); o.setframerate(sr); o.writeframes(frames)
-        subprocess.run(["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", raw, small], check=True)
-        return open(small, "rb").read()
+        if sys.platform == "darwin" and os.path.exists("/usr/bin/afconvert") and not os.environ.get("MUSIC_EARS_NO_AFCONVERT"):
+            subprocess.run(["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", raw, small], check=True)
+            return open(small, "rb").read()
+    return to16k_mono(frames, sr, ch, sw)
+
+
+def to16k_mono(frames, sr, ch, sw):
+    """不是 macOS 时：纯 Python 混成单声道、降到 16k（每个输出点取它覆盖的那几个原始点的平均，顺带滤掉高频）。"""
+    import array
+    from itertools import accumulate
+    if sw != 2:
+        raise ValueError("只认 16 位的 wav")
+    a = array.array("h")
+    a.frombytes(frames[:len(frames) - len(frames) % (2 * ch)])
+    if sys.byteorder == "big":
+        a.byteswap()
+    mono = a if ch == 1 else [sum(x) // ch for x in zip(*(a[k::ch] for k in range(ch)))]
+    pre = [0] + list(accumulate(mono))
+    r, n = sr / 16000, int(len(mono) * 16000 / sr)
+    out = array.array("h")
+    for k in range(n):
+        s, e = int(k * r), max(int(k * r) + 1, int((k + 1) * r))
+        e = min(e, len(mono))
+        out.append(int((pre[e] - pre[s]) / max(1, e - s)))
+    if sys.byteorder == "big":
+        out.byteswap()
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as o:
+        o.setnchannels(1); o.setsampwidth(2); o.setframerate(16000); o.writeframes(out.tobytes())
+    return buf.getvalue()
 
 
 # ---------- 调模型 ----------
