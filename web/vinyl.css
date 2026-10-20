@@ -1,48 +1,84 @@
 /* music-ears 黑胶播放器。所有样式都挂在 .mev 下面，嵌进别的网页不会互相干扰。
    背景是这首歌的封面放大、模糊、压暗；中间唱片，点一下变全屏歌词；下面细进度条 + 玻璃播放键。 */
 .mev, .mev * { box-sizing: border-box; }
-.mev { --mev-accent: #e8936f; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+.mev {
+  /* ===== 外观变量：换装就是改这些（每一项是什么见 docs/skin.md）。默认值就是原来的样子 ===== */
+  --mev-font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mev-accent: #e8936f;                 /* 强调色：一起听按钮、进度条填色 */
+  --mev-fg: #fff;                        /* 主要文字 */
+  --mev-dim: rgba(255,255,255,.6);       /* 次要文字：歌手、时间 */
+  --mev-icon: rgba(255,255,255,.9);      /* 图标、按钮 */
+  --mev-bg: #121110;                     /* 播放页底色 */
+  --mev-bg-fallback: #2a2522;            /* 没有封面时的背景 */
+  --mev-bg-filter: blur(70px) saturate(1.5) brightness(.5);   /* 封面铺底的处理：模糊、饱和、亮度 */
+  --mev-bg-shade: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.45));   /* 铺底上再压一层 */
+  --mev-title-size: 17px;
+  --mev-disc-size: min(76vw, 320px, 52vh);
+  --mev-disc-inner: #1b1b1b;             /* 唱片中心 → 边缘的颜色 */
+  --mev-disc-outer: #090909;
+  --mev-disc-groove: rgba(255,255,255,.035);   /* 唱片纹路 */
+  --mev-disc-shine: rgba(255,255,255,.06);     /* 唱片反光 */
+  --mev-disc-shadow: 0 24px 60px rgba(0,0,0,.5);
+  --mev-label-size: 64%;                 /* 中间封面占唱片多大 */
+  --mev-label-radius: 50%;               /* 封面圆角：50% 是圆的，12% 是圆角方块 */
+  --mev-spin: 18s;                       /* 转一圈几秒 */
+  --mev-arm: linear-gradient(rgba(255,255,255,.92), rgba(255,255,255,.6));   /* 唱臂（颜色或渐变都行） */
+  --mev-lyric-size: 17px;
+  --mev-lyric: rgba(255,255,255,.42);    /* 别的歌词 */
+  --mev-lyric-cur: #fff;                 /* 正在唱的那句 */
+  --mev-lyric-scale: 1.06;               /* 正在唱的那句放大多少 */
+  --mev-track: rgba(255,255,255,.22);    /* 进度条底 */
+  --mev-track-fill: rgba(255,255,255,.9);/* 进度条已放 */
+  --mev-glass: rgba(255,255,255,.14);    /* 播放键的玻璃 */
+  --mev-surface: rgba(255,255,255,.08);  /* 标签底、按下的底色 */
+  --mev-cur-item: #f6c9b4;               /* 列表里正在放的那首 */
+  --mev-menu-bg: rgba(44,40,38,.94);     /* "⋯"菜单 */
+  --mev-card-bg: #f6f2ee;                /* 登录、确认这类小卡片 */
+  --mev-card-fg: #1d1b1a;
+  --mev-toast-bg: rgba(30,28,26,.92);    /* 底部提示、进度条底 */
+  --mev-radius: 12px;                    /* 列表项圆角 */
+  font-family: var(--mev-font);
   -webkit-font-smoothing: antialiased; }
 .mev button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .mev svg.ic { width: 22px; height: 22px; display: block; }
 .mev [hidden] { display: none !important; }
 
 /* 播放页：盖满整个窗口 */
-.mev-sheet { position: fixed; inset: 0; z-index: 2147483000; background: #121110; color: #fff; overflow: hidden;
+.mev-sheet { position: fixed; inset: 0; z-index: 2147483000; background: var(--mev-bg); color: var(--mev-fg); overflow: hidden;
   display: flex; flex-direction: column; transform: translateY(0); transition: transform .32s cubic-bezier(.3,.9,.3,1); }
 .mev-sheet.off { transform: translateY(102%); pointer-events: none; }
 .mev-sheet > :not(.mev-bg) { position: relative; z-index: 1; }
-.mev-bg { position: absolute; inset: -12%; z-index: 0; background: #2a2522 center / cover no-repeat; transition: background-image .6s ease;
-  filter: blur(70px) saturate(1.5) brightness(.5); transform: scale(1.15); pointer-events: none; }
-.mev-bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.45)); }
+.mev-bg { position: absolute; inset: -12%; z-index: 0; background: var(--mev-bg-fallback) center / cover no-repeat; transition: background-image .6s ease;
+  filter: var(--mev-bg-filter); transform: scale(1.15); pointer-events: none; }
+.mev-bg::after { content: ""; position: absolute; inset: 0; background: var(--mev-bg-shade); }
 
 .mev-head { flex: none; display: flex; align-items: center; gap: 8px; padding: calc(10px + env(safe-area-inset-top)) 10px 6px; }
-.mev-hbtn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: rgba(255,255,255,.9); flex: none; }
-.mev-hbtn:active { background: rgba(255,255,255,.08); }
+.mev-hbtn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--mev-icon); flex: none; }
+.mev-hbtn:active { background: var(--mev-surface); }
 .mev-ht { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
-.mev-ht b { font-size: 17px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mev-ht span { font-size: 12.5px; opacity: .6; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mev-ht b { font-size: var(--mev-title-size); font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mev-ht span { font-size: 12.5px; color: var(--mev-dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mev-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 26px calc(18px + env(safe-area-inset-bottom)); }
 .mev-main { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; }
 .mev-main.lyr .mev-stage, .mev-main:not(.lyr) .mev-lyric { display: none; }
-.mev-stage { position: relative; width: min(76vw, 320px, 52vh); aspect-ratio: 1; margin-top: -4vh; }
+.mev-stage { position: relative; width: var(--mev-disc-size); aspect-ratio: 1; margin-top: -4vh; }
 .mev-disc { position: absolute; inset: 0; border-radius: 50%;
-  background: repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,.035) 0 .8px, transparent 1.2px 3px), radial-gradient(circle, #1b1b1b 0, #090909 72%);
-  box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.07), inset 0 0 0 8px rgba(0,0,0,.6);
-  animation: mevSpin 18s linear infinite; animation-play-state: paused; }
+  background: repeating-radial-gradient(circle at 50% 50%, var(--mev-disc-groove) 0 .8px, transparent 1.2px 3px), radial-gradient(circle, var(--mev-disc-inner) 0, var(--mev-disc-outer) 72%);
+  box-shadow: var(--mev-disc-shadow), 0 0 0 1px rgba(255,255,255,.07), inset 0 0 0 8px rgba(0,0,0,.6);
+  animation: mevSpin var(--mev-spin) linear infinite; animation-play-state: paused; }
 .mev-disc::after { content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
-  background: conic-gradient(from 200deg, transparent 0 12%, rgba(255,255,255,.06) 17%, transparent 24% 62%, rgba(255,255,255,.04) 67%, transparent 74%); }
+  background: conic-gradient(from 200deg, transparent 0 12%, var(--mev-disc-shine) 17%, transparent 24% 62%, var(--mev-disc-shine) 67%, transparent 74%); }
 .mev-disc.on { animation-play-state: running; }
-.mev-cover { position: absolute; left: 18%; top: 18%; width: 64%; height: 64%; border-radius: 50%; object-fit: cover; background: #3a322d;
+.mev-cover { position: absolute; left: calc((100% - var(--mev-label-size)) / 2); top: calc((100% - var(--mev-label-size)) / 2); width: var(--mev-label-size); height: var(--mev-label-size); border-radius: var(--mev-label-radius); object-fit: cover; background: #3a322d;
   box-shadow: 0 0 0 1px rgba(0,0,0,.4); pointer-events: none; -webkit-user-drag: none; }
 .mev-cover:not([src]), .mev-cover[src=""] { visibility: hidden; }
 @keyframes mevSpin { to { transform: rotate(360deg); } }
 .mev-arm { position: absolute; left: 50%; top: -15%; width: 3px; height: 40%; margin-left: 12px; border-radius: 3px;
-  background: linear-gradient(rgba(255,255,255,.9), rgba(255,255,255,.55)); transform-origin: 50% 3%; transform: rotate(-28deg);
+  background: var(--mev-arm); transform-origin: 50% 3%; transform: rotate(-28deg);
   transition: transform .7s cubic-bezier(.3,1.25,.55,1); box-shadow: 0 4px 10px rgba(0,0,0,.35); }
-.mev-arm::before { content: ""; position: absolute; left: -6px; top: -6px; width: 15px; height: 15px; border-radius: 50%; background: rgba(255,255,255,.92); }
-.mev-arm::after { content: ""; position: absolute; left: -3px; bottom: -4px; width: 9px; height: 14px; border-radius: 2px; background: rgba(255,255,255,.85); }
+.mev-arm::before { content: ""; position: absolute; left: -6px; top: -6px; width: 15px; height: 15px; border-radius: 50%; background: var(--mev-arm); }
+.mev-arm::after { content: ""; position: absolute; left: -3px; bottom: -4px; width: 9px; height: 14px; border-radius: 2px; background: var(--mev-arm); }
 .mev-arm.on { transform: rotate(-4deg); }
 
 /* 全屏歌词：当前句居中变亮变大，能手滑（5 秒后滚回） */
@@ -50,70 +86,70 @@
   mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); }
 .mev-lyric::-webkit-scrollbar { display: none; }
 .mev-lyric .in { padding: 45% 4px; }
-.mev-lyric .ln { font-size: 17px; line-height: 1.45; margin: 0 0 18px; color: rgba(255,255,255,.42); transition: color .3s, transform .3s; }
+.mev-lyric .ln { font-size: var(--mev-lyric-size); line-height: 1.45; margin: 0 0 18px; color: var(--mev-lyric); transition: color .3s, transform .3s; }
 .mev-lyric .ln small { display: block; font-size: 13px; margin-top: 3px; color: inherit; opacity: .85; }
-.mev-lyric .ln.cur { color: #fff; font-weight: 600; transform: scale(1.06); }
+.mev-lyric .ln.cur { color: var(--mev-lyric-cur); font-weight: 600; transform: scale(var(--mev-lyric-scale)); }
 
-.mev-bar { display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: rgba(255,255,255,.6); font-variant-numeric: tabular-nums; margin-top: 8px; }
+.mev-bar { display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: var(--mev-dim); font-variant-numeric: tabular-nums; margin-top: 8px; }
 .mev-bar input { flex: 1; -webkit-appearance: none; appearance: none; height: 18px; background: transparent; margin: 0; }
 .mev-bar input::-webkit-slider-runnable-track { height: 3px; border-radius: 3px;
-  background: linear-gradient(90deg, rgba(255,255,255,.9) var(--p, 0%), rgba(255,255,255,.22) var(--p, 0%)); }
-.mev-bar input::-moz-range-track { height: 3px; border-radius: 3px; background: rgba(255,255,255,.22); }
-.mev-bar input::-moz-range-progress { height: 3px; border-radius: 3px; background: rgba(255,255,255,.9); }
-.mev-bar input::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; margin-top: -4px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
-.mev-bar input::-moz-range-thumb { width: 11px; height: 11px; border: 0; border-radius: 50%; background: #fff; }
+  background: linear-gradient(90deg, var(--mev-track-fill) var(--p, 0%), var(--mev-track) var(--p, 0%)); }
+.mev-bar input::-moz-range-track { height: 3px; border-radius: 3px; background: var(--mev-track); }
+.mev-bar input::-moz-range-progress { height: 3px; border-radius: 3px; background: var(--mev-track-fill); }
+.mev-bar input::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; margin-top: -4px; border-radius: 50%; background: var(--mev-fg); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.mev-bar input::-moz-range-thumb { width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--mev-fg); }
 .mev-ctl { display: flex; align-items: center; justify-content: center; gap: 48px; margin: 14px 0 4px; }
-.mev-ctl button { color: rgba(255,255,255,.92); width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
+.mev-ctl button { color: var(--mev-icon); width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
 .mev-ctl button svg.ic { width: 26px; height: 26px; }
-.mev-ctl .big { width: 70px; height: 70px; border-radius: 50%; color: #fff; background: rgba(255,255,255,.14);
+.mev-ctl .big { width: 70px; height: 70px; border-radius: 50%; color: var(--mev-fg); background: var(--mev-glass);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
 .mev-ctl .big svg.ic { width: 28px; height: 28px; }
 
 /* 歌单 / 搜索 / 正在放 */
 .mev-lib { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 4px 18px 0; }
-.mev-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex: none; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.08); }
-.mev-tabs button { flex: 1; padding: 8px 0; border-radius: 999px; color: rgba(255,255,255,.75); font-size: 14px; }
-.mev-tabs button.on { background: rgba(255,255,255,.9); color: #151312; font-weight: 600; }
+.mev-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex: none; padding: 4px; border-radius: 999px; background: var(--mev-surface); }
+.mev-tabs button { flex: 1; padding: 8px 0; border-radius: 999px; color: var(--mev-dim); font-size: 14px; }
+.mev-tabs button.on { background: var(--mev-track-fill); color: var(--mev-bg); font-weight: 600; }
 .mev-search { flex: none; display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 0 16px; height: 44px; border-radius: 999px;
   background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
 .mev-search svg.ic { width: 18px; height: 18px; opacity: .6; flex: none; }
-.mev-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: #fff; font: inherit; font-size: 16px; -webkit-appearance: none; }
+.mev-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--mev-fg); font: inherit; font-size: 16px; -webkit-appearance: none; }
 .mev-search input::placeholder { color: rgba(255,255,255,.4); }
 .mev-search input::-webkit-search-cancel-button { display: none; }
 .mev-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
-.mev-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 4px; text-align: left; color: #fff; border-radius: 12px; }
-.mev-item:active { background: rgba(255,255,255,.08); }
-.mev-item img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: rgba(255,255,255,.08); flex: none; }
+.mev-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 4px; text-align: left; color: var(--mev-fg); border-radius: var(--mev-radius); }
+.mev-item:active { background: var(--mev-surface); }
+.mev-item img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: var(--mev-surface); flex: none; }
 .mev-item .t { flex: 1; min-width: 0; }
 .mev-item .t b { display: block; font-weight: 500; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mev-item .t span { display: block; font-size: 12.5px; opacity: .55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mev-item.cur b { color: #f6c9b4; }
+.mev-item.cur b { color: var(--mev-cur-item); }
 .mev-more { flex: none; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; opacity: .6; margin-right: -4px; }
 .mev-note { opacity: .55; font-size: 13px; padding: 12px 4px; line-height: 1.6; }
-.mev-note button { text-decoration: underline; opacity: 1; color: #fff; }
+.mev-note button { text-decoration: underline; opacity: 1; color: var(--mev-fg); }
 
 /* "⋯" 弹出来的小菜单 */
-.mev-menu { position: fixed; z-index: 2147483002; min-width: 168px; padding: 6px; border-radius: 16px; color: #fff;
-  background: rgba(44,40,38,.94); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+.mev-menu { position: fixed; z-index: 2147483002; min-width: 168px; padding: 6px; border-radius: 16px; color: var(--mev-fg);
+  background: var(--mev-menu-bg); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
   box-shadow: 0 12px 40px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.08); }
 .mev-menu button { display: block; width: 100%; text-align: left; padding: 11px 14px; border-radius: 10px; font-size: 15px; }
 .mev-menu button:active { background: rgba(255,255,255,.1); }
 
 /* 网易云扫码登录 */
 .mev-sheet > .mev-login { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,.55); }
-.mev-login .box { width: min(340px, 100%); padding: 22px 20px 18px; border-radius: 22px; color: #1d1b1a; background: #f6f2ee; text-align: center; }
+.mev-login .box { width: min(340px, 100%); padding: 22px 20px 18px; border-radius: 22px; color: var(--mev-card-fg); background: var(--mev-card-bg); text-align: center; }
 .mev-login h3 { margin: 0 0 12px; font-size: 17px; }
 .mev-login .qr { display: flex; justify-content: center; align-items: center; min-height: 200px; margin-bottom: 8px; }
 .mev-login .qr svg { width: 200px; height: 200px; }
 .mev-login p { margin: 6px 0; font-size: 13px; line-height: 1.6; color: #5a524d; }
 .mev-login .row { display: flex; gap: 8px; margin-top: 12px; }
 .mev-login .row a, .mev-login .row button { flex: 1; padding: 11px 0; border-radius: 12px; font-size: 14px; text-decoration: none; }
-.mev-login .row a { background: #1d1b1a; color: #fff; }
-.mev-login .row button { background: rgba(0,0,0,.07); color: #1d1b1a; }
+.mev-login .row a { background: var(--mev-card-fg); color: var(--mev-card-bg); }
+.mev-login .row button { background: rgba(0,0,0,.07); color: var(--mev-card-fg); }
 
 /* 底部一行提示 */
 .mev-toast { position: fixed; left: 50%; bottom: calc(160px + env(safe-area-inset-bottom)); transform: translate(-50%, 8px); z-index: 2147483003;
-  max-width: calc(100vw - 40px); padding: 9px 16px; border-radius: 999px; font-size: 13.5px; color: #fff; background: rgba(30,28,26,.92);
+  max-width: calc(100vw - 40px); padding: 9px 16px; border-radius: 999px; font-size: 13.5px; color: #fff; background: var(--mev-toast-bg);
   box-shadow: 0 6px 24px rgba(0,0,0,.35); opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none; }
 .mev-toast.on { opacity: 1; transform: translate(-50%, 0); }
 
@@ -137,10 +173,10 @@
 /* 拆乐谱卡的进度：浮在最上面居中，不管播放页开没开；底色从左往右填是进度 */
 .mev .mev-chip { position: fixed; left: 50%; top: calc(10px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 2147483004;
   max-width: calc(100vw - 32px); padding: 7px 14px 8px; border-radius: 999px; border: 0; font: inherit; font-size: 12.5px; color: #fff; cursor: pointer;
-  background: linear-gradient(90deg, rgba(232,147,111,.6) var(--p, 0%), rgba(30,28,26,.86) var(--p, 0%));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--mev-accent) 65%, transparent) var(--p, 0%), var(--mev-toast-bg) var(--p, 0%));
   -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 4px 16px rgba(0,0,0,.3);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 播放页开着时挪到下面（进度条上方），别压住歌名和标签 */
 .mev .mev-sheet:not(.off) ~ .mev-chip { top: auto; bottom: calc(170px + env(safe-area-inset-bottom)); }
 .mev-ask { position: fixed; inset: 0; z-index: 2147483005; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,.55); }
-.mev-ask .row button.ok { background: #1d1b1a; color: #fff; }
+.mev-ask .row button.ok { background: var(--mev-card-fg); color: var(--mev-card-bg); }
