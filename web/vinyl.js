@@ -91,10 +91,11 @@
       '</div>' +
       '<div class="mev-mini" hidden><div class="mev-disc"><img class="mev-cover" alt="" draggable="false"></div>' +
         '<button class="x" title="关掉">' + ic('x') + '</button><button class="l" title="一起听">' + ic('headphones') + '</button></div>' +
-      '<div class="mev-toast"></div>';
+      '<div class="mev-toast"></div><button class="mev-chip" hidden></button>';
     document.body.appendChild(root);
     const $ = (r) => root.querySelector('[data-r="' + r + '"]');
-    const sheet = root.querySelector('.mev-sheet'), mini = root.querySelector('.mev-mini'), toastEl = root.querySelector('.mev-toast');
+    const sheet = root.querySelector('.mev-sheet'), mini = root.querySelector('.mev-mini'), toastEl = root.querySelector('.mev-toast'), chip = root.querySelector('.mev-chip');
+    chip.onclick = () => open();
 
     let toastT = 0;
     function toast(msg, ms) {
@@ -194,10 +195,26 @@
     }
 
     /* 一起听：拆过的直接放；没拆过的先拆（几分钟），拆好再放。放的时候把位置报给后端，AI 读 /api/now 就知道放到哪 */
+    /* 一起听：要先有乐谱卡。没拆过就问要不要先拆（不动正在放的），拆好了再点一起听。
+       有卡：直接开始放，放的时候把位置报给后端，AI 读 /api/now 跟进度 */
     async function listen(t) {
       if (!t || !t.id) return;
       const cur = S.queue[S.idx], same = cur && cur.id === t.id;
       const resume = same ? (audio.currentTime || S.resume || 0) : 0;
+      if (!opts.onListen) {
+        let d;
+        try {
+          d = await (await fetch(B + 'api/listen', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: t.id, name: t.name, artists: t.artists || [] }) })).json();
+        } catch (e) { return toast('一起听没开起来：' + e.message); }
+        if (d.need_card) {
+          if (d.making) { mkTrack(t.id); return toast('《' + t.name + '》的乐谱卡' + (d.making === 'making' ? '正在拆' : '在排队拆') + '，好了提醒你'); }
+          const mins = Math.max(4, Math.round((t.dur || 240) * 2.1 / 60));
+          if (await ask('《' + t.name + '》还没拆乐谱卡', '一起听要先把乐谱卡给 AI。这首大约要 ' + mins + ' 分钟，拆的时候上方有进度，好了提醒你，再点一起听。', '现在拆')) makeCard(t);
+          return;
+        }
+        if (!d.ok) return toast('一起听没开起来' + (d.error ? '：' + d.error : ''));
+      }
       audio.pause();
       if (!same) {
         const old = S.queue.findIndex(x => x.id === t.id);
@@ -213,27 +230,62 @@
         try { await opts.onListen(t); go(); } catch (e) { S.together = null; toast('一起听没接上' + (e && e.message ? '：' + e.message : '') + '，先自己放着'); playAt(S.idx, resume); }
         return;
       }
+      toast('开始一起听《' + t.name + '》');
+      go();
+    }
+
+    /* 拆乐谱卡：只拆、存着；后端一次拆一首。进度条浮在上方（不管播放页开没开），在等的编号记在浏览器里 */
+    async function makeCard(t) {
       let d;
       try {
-        d = await (await fetch(B + 'api/listen', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: t.id, name: t.name, artists: t.artists || [] }) })).json();
-        if (!d.ok) throw new Error(d.error || '');
-      } catch (e) { S.together = null; toast('一起听没开起来' + (e.message ? '：' + e.message : '')); return; }
-      toast(d.have ? '《' + t.name + '》拆过，开始一起听' : '《' + t.name + '》在拆乐谱卡，约 5–8 分钟，拆好就开始放');
-      const poll = async () => {
-        if (S.together !== tg) return;
-        const now = S.queue[S.idx];
-        if (!now || now.id !== tg.id) return togetherEnd();
-        let st = 'making';
-        try { st = (await (await fetch(B + 'api/listen?id=' + tg.id, { cache: 'no-store', credentials: 'include' })).json()).state; } catch (e) {}
-        if (S.together !== tg) return;
-        if (st === 'ready') return go();
-        if (st === 'failed' || st === 'none') { S.together = null; toast('乐谱卡没拆成，先自己放着'); return playAt(S.idx, tg.resume); }
-        if (audio.paused) $('artist').textContent = '一起听 · 在拆乐谱卡…';
-        setTimeout(poll, 3000);
-      };
-      poll();
+        d = await (await fetch(B + 'api/make', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: t.id, name: t.name, dur: t.dur || 0 }) })).json();
+      } catch (e) { return toast('没排上：' + e.message); }
+      if (!d.ok) return toast('没排上' + (d.error ? '：' + d.error : ''));
+      if (d.have) return toast('《' + t.name + '》拆过了，点「一起听」就行');
+      if (d.ahead < 0) { mkTrack(t.id); return toast('《' + t.name + '》已经在拆或者排着了'); }
+      toast(d.ahead ? '《' + t.name + '》排上了，前面还有 ' + d.ahead + ' 首' : '开始拆《' + t.name + '》，好了提醒你', 4000);
+      mkTrack(t.id);
     }
+    const MK = opts.storageKey + '-making';
+    let mkT = 0;
+    const mkGet = () => { try { return new Set(JSON.parse(localStorage.getItem(MK) || '[]')); } catch (e) { return new Set(); } };
+    const mkPut = (m) => { try { localStorage.setItem(MK, JSON.stringify([...m])); } catch (e) {} };
+    function mkTrack(sid) { const m = mkGet(); m.add(sid); mkPut(m); mkPoll(0); }
+    function mkPoll(delay) {
+      clearTimeout(mkT);
+      mkT = setTimeout(async () => {
+        const mine = mkGet();
+        let d = null;
+        try { d = await (await fetch(B + 'api/queue', { cache: 'no-store', credentials: 'include' })).json(); } catch (e) {}
+        if (!d || !d.ok) return mine.size && mkPoll(15000);
+        for (const x of d.done || []) if (mine.has(x.sid)) { mine.delete(x.sid); toast(x.ok ? '《' + x.title + '》的乐谱卡拆好了，可以一起听了' : '《' + x.title + '》没拆成', 6000); }
+        const m = d.making, q = d.queued || [];
+        for (const sid of [...mine]) if (!(m && m.sid === sid) && !q.some(x => x.sid === sid)) mine.delete(sid);   // 后端重启后队列没了
+        mkPut(mine);
+        if (m) {
+          chip.textContent = '拆乐谱卡《' + m.name + '》· ' + (m.elapsed < m.est ? '约 ' + Math.max(1, Math.floor(m.elapsed / 60)) + '/' + Math.max(1, Math.round(m.est / 60)) + ' 分钟' : '快好了') + (q.length ? ' · 还排着 ' + q.length + ' 首' : '');
+          chip.style.setProperty('--p', Math.min(100, Math.round(m.elapsed / m.est * 100)) + '%');
+        } else if (q.length) chip.textContent = '乐谱卡排着 ' + q.length + ' 首';
+        chip.hidden = !m && !q.length;
+        if (!chip.hidden || mine.size) mkPoll(10000);
+      }, delay == null ? 10000 : delay);
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) mkPoll(0); });
+
+    /* 问一句（是 / 否），用的是登录框那套样子 */
+    function ask(title, text, okText) {
+      return new Promise((done) => {
+        const w = document.createElement('div'); w.className = 'mev-login mev-ask';
+        w.innerHTML = '<div class="box"><h3></h3><p></p><div class="row"><button class="ok"></button><button class="no">取消</button></div></div>';
+        w.querySelector('h3').textContent = title; w.querySelector('p').textContent = text; w.querySelector('.ok').textContent = okText || '好';
+        const close = (v) => { w.remove(); done(v); };
+        w.querySelector('.ok').onclick = () => close(true); w.querySelector('.no').onclick = () => close(false);
+        w.onclick = (e) => { if (e.target === w) close(false); };
+        root.appendChild(w);
+      });
+    }
+
     let repAt = 0;
     // 在放歌就报位置，不看页面记不记得"一起听"（手机切出去回来页面会重载，记的就丢了）；是不是一起听的那首由后端判断
     function report(force) {
@@ -305,8 +357,8 @@
           isNow ? k === S.idx : S.queue[S.idx] && S.queue[S.idx].id === t.id,
           () => { if (!isNow) S.queue = list.slice(); playAt(k); showLib(false); },
           (row) => menu(row, (isNow ? [{ id: 'next', name: '下一首播放' }, { id: 'rm', name: '从列表移除' }]
-                                    : [{ id: 'next', name: '下一首播放' }, { id: 'end', name: '加到列表末尾' }]).concat([{ id: 'listen', name: '一起听' }]))
-            .then(how => { if (how === 'listen') { listen(t); showLib(false); } else if (how) queueOp(t, how, k); })));
+                                    : [{ id: 'next', name: '下一首播放' }, { id: 'end', name: '加到列表末尾' }]).concat([{ id: 'listen', name: '一起听' }, { id: 'card', name: '拆乐谱卡' }]))
+            .then(how => { if (how === 'listen') { listen(t); showLib(false); } else if (how === 'card') makeCard(t); else if (how) queueOp(t, how, k); })));
       }
       if (list.length > n) l.appendChild(item('', '再显示 300 首', '还有 ' + (list.length - n) + ' 首', false, () => { S.showN = n + 300; songs(list, label); }));
     }
@@ -486,11 +538,12 @@
       } catch (e) {}
     }
     pollCmd(); setInterval(pollCmd, 4000);
+    mkPoll(800);
 
     load(); paintSong(); paintPlay();
     if (opts.open) open();
     return {
-      open, minimize, close, listen,
+      open, minimize, close, listen, makeCard,
       play(track) { if (!track || !track.id) return; const k = S.queue.findIndex(x => x.id === track.id); if (k >= 0) playAt(k); else { S.queue.splice(S.idx + 1, 0, track); playAt(S.idx + 1); } },
       state() { const t = S.queue[S.idx]; return { track: t || null, pos: audio.currentTime || 0, dur: audio.duration || 0, playing: !audio.paused, line: (S.lrc[S.curLine] || {}).text || '' }; },
       audio,

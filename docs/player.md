@@ -32,7 +32,9 @@ music-ears serve --host 0.0.0.0 --token 一串口令
 ## 二、一起听
 
 1. 在歌的「⋯」里，或者长按小唱片，选「一起听」。
-2. 这首拆过，就直接开始放；没拆过，后台先拆，大约 5–8 分钟（要 Docker 和模型钥匙，见 README），拆好再放。
+2. **一起听要先有乐谱卡**。这首拆过，就直接开始放；没拆过，会问你要不要先拆。拆一首大约是歌长的两倍（4 分钟的歌约 8 分钟，要 Docker，模型钥匙可选，见 README），拆好了提醒你，再点一起听。
+   - 也可以提前拆：歌的「⋯」里选 **「拆乐谱卡」**，只拆、存着。
+   - 一次只拆一首，多点几首就排队。拆的时候屏幕上方浮一条进度（歌名、约几分钟 / 预计几分钟、还排着几首），关掉播放页、刷新页面都还在，点一下打开播放器。
 3. 放的过程中，播放器每隔几秒，以及暂停、拖动、换句的时候，会把位置报给后端。
 4. **AI 那边**读这个地址：
 
@@ -96,8 +98,10 @@ GET http://127.0.0.1:8790/api/now?format=text
 | `GET /cover?u=网易云图片地址&s=100\|200\|500\|512` | 封面代取 + 缓存（有些 App 里直接加载网易云的图会一直挂着） |
 | `GET /api/cards` | 拆过的卡 |
 | `GET /api/card?dir=文件夹名` | 某张卡全文（Markdown） |
-| `POST /api/listen {id, name, artists}` | 开始一起听：拆过回 `have: true`，没拆过后台开始拆 |
-| `GET /api/listen?id=…` | 拆到哪了：`making` / `ready` / `failed` / `none` |
+| `POST /api/listen {id, name, artists}` | 开始一起听：要先有卡，没拆过回 `need_card: true`（还会带 `making`：正在拆 / 排队中） |
+| `GET /api/listen?id=…` | 这首卡的状态：`ready` / `queued` / `making` / `failed` / `none` |
+| `POST /api/make {id, name, dur}` | 拆乐谱卡：只拆、存着；拆过回 `have`，排上了回 `ahead`（前面还有几首），已经在拆或排着回 -1 |
+| `GET /api/queue` | 拆歌进度：`making`（歌名、已经拆了几秒 `elapsed`、预计几秒 `est`）、`queued`、最近一小时拆好的 `done` |
 | `POST /api/pos {id, pos, dur, line, playing}` | 播放器报位置；`{id, ended: true}` 放完，`{id, stop: true}` 不听了 |
 | `GET /api/now[?format=text]` | 给 AI：现在放到哪 + 前后十秒的乐谱卡 |
 | `GET /api/cmd?since=序号` | 播放器每 4 秒问一次：AI（MCP 的 `play`）有没有点歌 |

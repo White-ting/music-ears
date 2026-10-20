@@ -133,3 +133,14 @@
 @media (min-width: 720px) {
   .mev-body, .mev-lib { width: 100%; max-width: 560px; margin: 0 auto; }
 }
+
+/* 拆乐谱卡的进度：浮在最上面居中，不管播放页开没开；底色从左往右填是进度 */
+.mev .mev-chip { position: fixed; left: 50%; top: calc(10px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 2147483004;
+  max-width: calc(100vw - 32px); padding: 7px 14px 8px; border-radius: 999px; border: 0; font: inherit; font-size: 12.5px; color: #fff; cursor: pointer;
+  background: linear-gradient(90deg, rgba(232,147,111,.6) var(--p, 0%), rgba(30,28,26,.86) var(--p, 0%));
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 4px 16px rgba(0,0,0,.3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 播放页开着时挪到下面（进度条上方），别压住歌名和标签 */
+.mev .mev-sheet:not(.off) ~ .mev-chip { top: auto; bottom: calc(170px + env(safe-area-inset-bottom)); }
+.mev-ask { position: fixed; inset: 0; z-index: 2147483005; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,.55); }
+.mev-ask .row button.ok { background: #1d1b1a; color: #fff; }

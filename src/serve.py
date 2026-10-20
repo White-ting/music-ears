@@ -11,8 +11,10 @@
   GET  /cover?u=网易云图片地址&s=100|200|500|512               封面代取（有些环境直连网易云图床会卡住），缓存在 cache/covers
   GET  /api/cards                                             拆过的卡
   GET  /api/card?dir=文件夹名                                  某张卡全文（text/markdown）
-  POST /api/listen {id, name, artists}                        一起听：拆过就 ready，没拆过就后台拆（making）
-  GET  /api/listen?id=…                                       一起听的状态：making / ready / failed / none
+  POST /api/listen {id, name, artists}                        一起听（要先有卡：没拆过回 need_card）
+  GET  /api/listen?id=…                                       这首卡的状态：ready / queued / making / failed / none
+  POST /api/make {id, name, dur}                              拆乐谱卡：只拆、存着（一次拆一首，排队）
+  GET  /api/queue                                             拆歌进度：making{name, elapsed, est}、queued、done
   POST /api/pos {id, pos, dur, line, playing, ended|stop}      播放器报位置
   GET  /api/now[?format=text][&mode=window|book]             给 AI 的：现在放到哪 + 前后十秒摘录（window）或书签（book）
   GET  /api/cmd?since=序号                                     播放器问：AI 有没有点歌
@@ -199,24 +201,70 @@ def now_info(mode=None):
             "dur": x.get("dur") or 0, "line": x.get("line") or "", "window": win, "bookmark": mark, "text": text + "〕"}
 
 
-def start_job(sid):
-    """后台拆这首（几分钟）。同一首不拆两遍。"""
-    with LOCK:
-        if JOBS.get(sid) == "making":
-            return
-        JOBS[sid] = "making"
+# 拆歌排队：一次只拆一首（同时拆几首会互相抢电脑，都变慢）
+QUEUE = []        # [(歌编号, 歌名, 歌长秒)]
+CUR = {}          # 正在拆的：{sid, name, dur, since}
+DONE = []         # 最近拆好的：[{sid, title, ok, at}]
+CV = threading.Condition(LOCK)
+_worker = [None]
 
-    def go():
+
+def est_secs(dur):
+    """拆一首大概多久：一般是歌长的两倍上下（4 分钟的歌 8 分钟），最少按 4 分钟算。"""
+    return max(240, (dur or 240) * 2.1)
+
+
+def start_job(sid, name="", dur=0):
+    """排进去拆。回前面还有几首（0 = 马上开始）；已经在拆或在排回 -1。"""
+    with CV:
+        if CUR.get("sid") == sid or any(j[0] == sid for j in QUEUE):
+            return -1
+        ahead = len(QUEUE) + (1 if CUR else 0)
+        QUEUE.append((sid, name or sid, dur))
+        JOBS[sid] = "queued"
+        if not (_worker[0] and _worker[0].is_alive()):
+            _worker[0] = threading.Thread(target=worker, daemon=True)
+            _worker[0].start()
+        CV.notify()
+    return ahead
+
+
+def job_state(sid):
+    """(making / queued / None, 前面还有几首)"""
+    with CV:
+        if CUR.get("sid") == sid:
+            return "making", 0
+        for k, j in enumerate(QUEUE):
+            if j[0] == sid:
+                return "queued", k + (1 if CUR else 0)
+    return None, 0
+
+
+def worker():
+    while True:
+        with CV:
+            while not QUEUE:
+                CV.wait()
+            sid, name, dur = QUEUE.pop(0)
+            CUR.update(sid=sid, name=name, dur=dur, since=time.time())
+            JOBS[sid] = "making"
         try:
             r = cli(sid, timeout=1800)
             ok = r.returncode == 0 and card_path(sid)
             if not ok:
-                sys.stderr.write("拆《%s》没成：%s\n" % (sid, (r.stderr or r.stdout or "")[-300:]))
+                sys.stderr.write("拆《%s》没成：%s\n" % (name, (r.stderr or r.stdout or "")[-300:]))
         except subprocess.TimeoutExpired:
             ok = False
-        with LOCK:
+        title = name
+        if ok:
+            try:
+                title = open(card_path(sid), encoding="utf-8").readline().replace("# 乐谱卡：", "").split(" — ")[0].strip() or name
+            except OSError:
+                pass
+        with CV:
             JOBS[sid] = "ready" if ok else "failed"
-    threading.Thread(target=go, daemon=True).start()
+            CUR.clear()
+            DONE[:] = [d for d in DONE if time.time() - d["at"] < 3600][-20:] + [{"sid": sid, "title": title, "ok": bool(ok), "at": time.time()}]
 
 
 # ---------- MCP：给能接工具的 AI（Aru、Claude App 的自定义连接器、Claude Code……） ----------
@@ -316,8 +364,10 @@ def mcp_call(name, a):
         i = cli_json("info", sid)
         if i.get("ok") and not i.get("free_audio") and not i.get("login"):
             raise ValueError("《%s》是会员歌，拿不到音频：先在播放器里扫码登录网易云会员号" % i.get("name", sid))
-        start_job(sid)
-        return "开始拆《%s》了，约 5–8 分钟。过几分钟用 get_card 看。" % (i.get("name") or sid)
+        ahead = start_job(sid, i.get("name") or sid, i.get("duration") or 0)
+        wait = round(est_secs(i.get("duration")) / 60)
+        return ("开始拆《%s》了，约 %d 分钟。" % (i.get("name") or sid, wait) if ahead <= 0 else
+                "《%s》排上了，前面还有 %d 首，每首要好几分钟。" % (i.get("name") or sid, ahead)) + "过一会儿用 get_card 看。"
     if name == "get_card":
         d, sid = _card_dir(a.get("song"))
         if not d:
@@ -487,16 +537,33 @@ class H(BaseHTTPRequestHandler):
                 sid = str(body.get("id") or "")
                 if not sid.isdigit():
                     return self.json({"ok": False, "error": "要网易云歌曲编号"}, 400)
+                if not card_path(sid):   # 一起听要先有卡：没拆过就让播放器提示先拆，这时不算一起听
+                    st, ahead = job_state(sid)
+                    return self.json({"ok": False, "need_card": True, "making": st, "ahead": ahead})
                 with LOCK:
                     NOW.clear()
                     NOW.update(session=time.time(), card_given=False, id=sid, name=str(body.get("name") or "")[:60], artists=[str(a)[:30] for a in (body.get("artists") or [])][:4])
-                have = bool(card_path(sid))
-                if not have:
-                    start_job(sid)
-                return self.json({"ok": True, "have": have})
+                return self.json({"ok": True, "have": True})
             sid = (q.get("id") or [""])[0]
             st = "ready" if card_path(sid) else JOBS.get(sid, "none")
             return self.json({"ok": True, "state": st})
+        if p == "api/make" and method == "POST":   # 拆乐谱卡（只拆、存着）
+            sid = str(body.get("id") or "")
+            if not sid.isdigit():
+                return self.json({"ok": False, "error": "要网易云歌曲编号"}, 400)
+            if card_path(sid):
+                return self.json({"ok": True, "have": True})
+            try:
+                dur = float(body.get("dur") or 0)
+            except (TypeError, ValueError):
+                dur = 0
+            return self.json({"ok": True, "ahead": start_job(sid, str(body.get("name") or sid)[:60], dur)})
+        if p == "api/queue":   # 拆歌进度：在拆哪首、拆了多久、预计多久，还排着哪些，最近拆好了哪些
+            with CV:
+                cur, q = dict(CUR), [{"sid": j[0], "name": j[1]} for j in QUEUE]
+                done = [d for d in DONE if time.time() - d["at"] < 3600]
+            making = {"sid": cur["sid"], "name": cur["name"], "elapsed": round(time.time() - cur["since"]), "est": round(est_secs(cur.get("dur")))} if cur else None
+            return self.json({"ok": True, "making": making, "queued": q, "done": done})
         if p == "api/pos" and method == "POST":
             sid = str(body.get("id") or "")
             with LOCK:
