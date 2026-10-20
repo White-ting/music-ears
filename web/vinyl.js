@@ -235,14 +235,15 @@
       poll();
     }
     let repAt = 0;
+    // 在放歌就报位置，不看页面记不记得"一起听"（手机切出去回来页面会重载，记的就丢了）；是不是一起听的那首由后端判断
     function report(force) {
-      const tg = S.together, t = S.queue[S.idx];
-      if (!tg || !tg.started || !t || t.id !== tg.id) return;
+      const t = S.queue[S.idx];
+      if (!t || !t.id || !audio.src) return;
       if (!force && Date.now() - repAt < 4000) return;
       repAt = Date.now();
       const l = S.lrc[S.curLine];
       fetch(B + 'api/pos', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: tg.id, pos: audio.currentTime || 0, dur: audio.duration || t.dur || 0, line: l ? l.text : '', playing: !audio.paused }) }).catch(() => {});
+        body: JSON.stringify({ id: t.id, pos: audio.currentTime || 0, dur: audio.duration || t.dur || 0, line: l ? l.text : '', playing: !audio.paused }) }).catch(() => {});
     }
     function togetherEnd(ended) {
       const tg = S.together; if (!tg) return;

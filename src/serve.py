@@ -166,7 +166,11 @@ def now_info(mode=None):
     who = config.name()
     if x.get("ended"):
         return {"state": "ended", "id": x["id"], "text": "〔一起听：%s那边%s放完了〕" % (who, song)}
+    if x.get("switched"):
+        return {"state": "switched", "id": x["id"], "text": "〔一起听：%s换到别的歌了，%s这首的一起听结束〕" % (who, song)}
     if not x.get("at"):
+        if card_path(x["id"]) and time.time() - x.get("session", time.time()) > 600:
+            return {"state": "unknown", "id": x["id"], "text": "〔一起听：%s的卡好了，但一直没收到%s的播放进度，不知道她听到哪了〕" % (song, who)}
         return {"state": "starting", "id": x["id"], "text": "〔一起听：%s准备开始放%s〕" % (who, song)}
     pos, ago = x.get("pos") or 0, time.time() - x["at"]
     note = ""
@@ -496,6 +500,8 @@ class H(BaseHTTPRequestHandler):
         if p == "api/pos" and method == "POST":
             sid = str(body.get("id") or "")
             with LOCK:
+                if NOW.get("id") and NOW.get("id") != sid and NOW.get("at") and body.get("playing") and not NOW.get("ended"):
+                    NOW["switched"] = True   # 一起听的那首放过了，现在在放别的：她换歌了
                 if NOW.get("id") != sid:
                     return self.json({"ok": True, "together": False})
                 if body.get("ended"):
