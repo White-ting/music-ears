@@ -14,7 +14,7 @@ music-ears serve
 - **放歌**：右上角进歌单 / 搜索 / 正在放。每首右边「⋯」：下一首播放、加到列表末尾、一起听。
 - **播放页**：唱片在转，背景是封面放大后的磨砂模糊；点一下唱片切到**全屏歌词**（当前句高亮，带翻译，可以手滑，松手 5 秒后滚回唱到的那句）。左上角缩小后是一个浮着的小唱片，能拖；点一下回到播放页，长按冒出「关掉」和「一起听」。
 - 锁屏、控制中心、耳机线控都能切歌、暂停（MediaSession）。
-- **换外观**：颜色、唱片、封面形状、歌词都能改，写一个 `~/.config/music-ears/skin.css` 就行，见 [skin.md](skin.md)。
+- **换外观**：颜色、唱片、封面形状、歌词都能改，写一个 `~/.config/music-ears/skin.css`，或者让接了 MCP 的 AI 帮你换，见 [skin.md](skin.md)。
 - **AI 点歌**：接了 MCP 的 AI 用 `play` 给你点的歌，会排进"下一首"（或者马上放），屏幕下方冒一句它想说的话。
 - 播放地址大约二十分钟过期，过期了会自动重新要一个、从原来的秒数接着放。
 
@@ -105,7 +105,8 @@ GET http://127.0.0.1:8790/api/now?format=text
 | `GET /api/queue` | 拆歌进度：`making`（歌名、已经拆了几秒 `elapsed`、预计几秒 `est`）、`queued`、最近一小时拆好的 `done` |
 | `POST /api/pos {id, pos, dur, line, playing}` | 播放器报位置；`{id, ended: true}` 放完，`{id, stop: true}` 不听了 |
 | `GET /api/now[?format=text]` | 给 AI：现在放到哪 + 前后十秒的乐谱卡 |
-| `GET /api/cmd?since=序号` | 播放器每 4 秒问一次：AI（MCP 的 `play`）有没有点歌 |
+| `GET /api/cmd?since=序号` | 播放器每 4 秒问一次：AI（MCP 的 `play`）有没有点歌；`skin` 号变了就重新拿外观 |
+| `GET /skin.css` | 外观：你手写的 `skin.css` + AI 换上的那套（见 [skin.md](skin.md)）；`vinyl.js` 自己会加载，嵌入时不想要就 `mount({skin: false})` |
 
 命令行也有对应的：`music-ears vinyl playlists | tracks | url | lyric | search`、`music-ears login start | check | me`、`music-ears list --json`、`music-ears card 文件夹名`。
 

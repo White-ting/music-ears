@@ -17,7 +17,8 @@
   GET  /api/queue                                             拆歌进度：making{name, elapsed, est}、queued、done
   POST /api/pos {id, pos, dur, line, playing, ended|stop}      播放器报位置
   GET  /api/now[?format=text][&mode=window|book]             给 AI 的：现在放到哪 + 前后十秒摘录（window）或书签（book）
-  GET  /api/cmd?since=序号                                     播放器问：AI 有没有点歌
+  GET  /api/cmd?since=序号                                     播放器问：AI 有没有点歌、换没换外观
+  GET  /skin.css、/skin-img/名字/bg.xxx                        外观（docs/skin.md）
   POST /mcp                                                   MCP（streamable HTTP，只回 JSON）：搜歌、拆歌、读卡、一起听
 """
 import hashlib
@@ -34,13 +35,13 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import config
+import skin
 
 HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 WEB = os.path.join(HOME, "web")
 CACHE = os.path.join(HOME, "cache")
 COVERS = os.path.join(CACHE, "covers")
 CLI = os.path.join(HOME, "music-ears")
-SKIN = os.path.expanduser("~/.config/music-ears/skin.css")   # 自己的外观，见 docs/skin.md；没有就是默认样子
 STATIC = {"index.html": "text/html; charset=utf-8", "vinyl.js": "text/javascript; charset=utf-8",
           "vinyl.css": "text/css; charset=utf-8", "qrcode.min.js": "text/javascript; charset=utf-8"}
 
@@ -49,6 +50,7 @@ JOBS = {}     # 歌编号 → making / ready / failed
 NOW = {}      # 一起听的那首：{id, name, artists, pos, dur, line, playing, at, ended}
 CMD = {"seq": 0}   # AI 点的歌（MCP 的 play）：{seq, track, mode, note, at}；播放器问 /api/cmd 拿
 SEEN = {"at": 0}   # 播放器上次来问是什么时候（判断它开没开着）
+SKINV = {"v": int(time.time())}   # 外观换了就加一，播放器看到变了重新拿 /skin.css
 BOOT = "%x" % int(time.time())   # 这次启动的编号：重启后序号从 0 数，播放器靠它知道要重新数
 LOCK = threading.Lock()
 
@@ -277,6 +279,7 @@ MCP_INSTRUCTIONS = (
     "get_card 读整张卡，或者给 at（比如 1:20）只读那一段。"
     "用户在黑胶播放器里点了「一起听」时，now_playing 告诉你放到哪一句：book 模式第一次给整张卡、之后只给书签，window 模式每次附前后十秒摘录。"
     "想给她点歌就用 play（默认排下一首，别随便打断她正在听的）。"
+    "她想换播放器的样子：先 skin_guide 看能改什么，再 set_skin 写一套（马上换上，播放器开着就实时变），list_skins / use_skin 换回以前的。"
     "卡里的数字是脚本量的，滑音、合唱、童声会冒出不存在的调外音，拿不准就说拿不准。")
 
 MCP_TOOLS = [
@@ -299,6 +302,20 @@ MCP_TOOLS = [
                                                        "mode": {"type": "string", "enum": ["next", "now"], "description": "next 排下一首（默认），now 马上放"},
                                                        "note": {"type": "string", "description": "点歌时想说的一句话（可以不写）"}},
                      "required": ["song"]}},
+    {"name": "skin_guide", "description": "黑胶播放器的外观说明：能改哪些变量（颜色、唱片、封面形状、歌词、进度条……）、例子、规矩。写 set_skin 之前先看。",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "set_skin", "description": "给黑胶播放器做一套外观并换上。css 只能是挂在 .mev 下的规则（主要是改 --mev-* 变量），不能 url()、@import 这类从外面加载东西的写法；不过关会告诉你哪里不行。可以带一张背景图（base64 的 png/jpg/webp，≤4MB），会铺在播放页背景上，想让图清楚就在 css 里写 --mev-bg-filter: none。同名的会被覆盖。",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "外观的名字，1–20 个字（中文、字母、数字、- _）"},
+                                                       "css": {"type": "string", "description": "CSS，比如 .mev { --mev-accent: #e0607e; }"},
+                                                       "image": {"type": "string", "description": "可选：背景图，base64"},
+                                                       "use": {"type": "boolean", "description": "存完马上换上，默认 true"}},
+                     "required": ["name", "css"]}},
+    {"name": "list_skins", "description": "存过的外观，哪套正在用。",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "use_skin", "description": "换上一套存过的外观；name 写 default 换回默认样子。",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "delete_skin", "description": "删掉一套存过的外观（正在用的话先换回默认）。",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "now_playing", "description": "一起听：用户在黑胶播放器里放到哪一句。两种报法（mode）：window 每次附上乐谱卡里前后十秒的旋律、和弦、听感；book 这一轮第一次调用时给你整张乐谱卡，之后只报书签（第几句、卡里哪一行），你自己翻卡。不填就用设置里的默认。没在一起听就说没有。",
      "inputSchema": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["window", "book"], "description": "window 摘录 / book 整本加书签"},
                                                        "card": {"type": "boolean", "description": "book 模式下要不要再给一遍整张卡（比如你的对话被压缩过、卡丢了）"}}}},
@@ -400,6 +417,29 @@ def mcp_call(name, a):
         if i.get("vip") and not cli_json("info", sid).get("login"):
             tail += "（这首是会员歌，她没登录网易云的话只能放试听片段）"
         return "点好了：《%s》— %s，%s。%s" % (i["name"], " / ".join(track["artists"]), "马上放" if mode == "now" else "排在下一首", tail)
+    if name == "skin_guide":
+        with open(os.path.join(HOME, "docs", "skin.md"), encoding="utf-8") as f:
+            return f.read()
+    if name in ("set_skin", "use_skin", "delete_skin"):
+        if name == "set_skin":
+            n = skin.save(a.get("name"), a.get("css"), a.get("image") or "", a.get("use", True) is not False)
+            msg = "存好了「%s」" % n + ("，换上了。" if a.get("use", True) is not False else "，没换上（use_skin 换）。")
+        elif name == "use_skin":
+            n = skin.use_skin(a.get("name"))
+            msg = "换上了「%s」。" % n if n else "换回默认样子了。"
+        else:
+            skin.delete(a.get("name"))
+            msg = "删了「%s」。" % a.get("name")
+        with LOCK:
+            SKINV["v"] += 1
+        open_ = time.time() - SEEN["at"] < 30
+        return msg + ("播放器开着，几秒内就变。" if open_ else "播放器现在没开着，下次打开就是这样。")
+    if name == "list_skins":
+        ns, cur = skin.names(), skin.active()
+        own = "（另外她自己写了 skin.css，一直叠在下面）" if os.path.isfile(skin.OWN) else ""
+        if not ns:
+            return "还没存过外观，现在是默认样子。" + own
+        return "\n".join(("● " if x == cur else "○ ") + x for x in ns) + "\n" + ("正在用：" + cur if cur else "现在是默认样子") + own
     if name == "now_playing":
         mode = listen_mode(a.get("mode"))
         info = now_info(mode)
@@ -489,7 +529,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(405, "text/plain; charset=utf-8", "MCP 只收 POST（不开 SSE）".encode(), {"Allow": "POST"})
             n = int(self.headers.get("Content-Length") or 0)
             try:
-                msg = json.loads(self.rfile.read(min(n, 1 << 20)) or b"null")
+                msg = json.loads(self.rfile.read(min(n, 8 << 20)) or b"null")   # set_skin 会带背景图
             except ValueError:
                 return self.json({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "不是 JSON"}}, 400)
             out = [r for r in (mcp_handle(m) for m in msg) if r] if isinstance(msg, list) else mcp_handle(msg if isinstance(msg, dict) else {})
@@ -513,11 +553,10 @@ class H(BaseHTTPRequestHandler):
             with open(os.path.join(WEB, p), "rb") as f:
                 return self.send(200, STATIC[p], f.read(), extra)
         if method == "GET" and p == "skin.css":
-            css = b""
-            if os.path.isfile(SKIN):
-                with open(SKIN, "rb") as f:
-                    css = f.read(200000)
-            return self.send(200, "text/css; charset=utf-8", css)
+            return self.send(200, "text/css; charset=utf-8", skin.css().encode())
+        if method == "GET" and p.startswith("skin-img/"):
+            got = skin.image(p[len("skin-img/"):])
+            return self.send(200, got[0], got[1]) if got else self.json({"ok": False, "error": "没有这张图"}, 404)
         if p == "cover":
             return self.cover(q)
         if p == "api/vinyl":
@@ -592,7 +631,7 @@ class H(BaseHTTPRequestHandler):
             with LOCK:
                 c = dict(CMD)
             fresh = c.get("seq", 0) > since and time.time() - c.get("at", 0) < 1800   # 半小时前点的就算了
-            return self.json({"ok": True, "boot": BOOT, "seq": c.get("seq", 0), "cmd": {k: c[k] for k in ("seq", "track", "mode", "note")} if fresh else None})
+            return self.json({"ok": True, "boot": BOOT, "seq": c.get("seq", 0), "skin": SKINV["v"], "cmd": {k: c[k] for k in ("seq", "track", "mode", "note")} if fresh else None})
         if p == "api/now":
             info = now_info((q.get("mode") or [None])[0])
             if (q.get("format") or [""])[0] == "text":

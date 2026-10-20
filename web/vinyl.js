@@ -512,6 +512,15 @@
       document.addEventListener('pointerdown', (e) => { if (mini.classList.contains('closing') && !mini.contains(e.target)) mini.classList.remove('closing'); }, true);
     })();
 
+    /* 外观（docs/skin.md）：skin.css 叠在 vinyl.css 后面；AI 用 set_skin / use_skin 换了，/api/cmd 里的 skin 号会变，重新拿 */
+    let skinLink = null, skinSeen = 0;
+    function loadSkin(v) {
+      if (opts.skin === false) return;
+      if (!skinLink) { skinLink = document.createElement('link'); skinLink.rel = 'stylesheet'; document.head.appendChild(skinLink); }
+      skinLink.href = B + 'skin.css?v=' + v;
+    }
+    loadSkin(Date.now());
+
     /* AI 点的歌（MCP 的 play）：每 4 秒问一次。处理过的序号记在浏览器里，刷新页面不会重放同一首；
        后端重启后序号从头数（靠 boot 认出来） */
     const CK = opts.storageKey + '-cmd';
@@ -523,6 +532,8 @@
         const d = await (await fetch(B + 'api/cmd?since=' + since, { cache: 'no-store', credentials: 'include' })).json();
         if (!d.ok) return;
         if (d.boot !== seen.boot) { seen = { boot: d.boot, seq: 0 }; }
+        if (skinSeen && d.skin !== skinSeen) loadSkin(d.skin);
+        skinSeen = d.skin;
         const c = d.cmd;
         if (c && c.seq > seen.seq) {
           const t = c.track, idle = S.idx < 0 || !S.queue[S.idx];
