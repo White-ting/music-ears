@@ -211,7 +211,10 @@ VERSION_WORDS = ("cover", "翻唱", "翻自", "原唱", "伴奏", "dj", "remix",
 def search(q):
     """搜歌名、歌手（先看歌名和歌手对不对得上，再看专辑）。多取 60 条，自己重新排：
     歌名 > 歌手 > 专辑；翻唱/伴奏/DJ/Live 这类没搜就往后放；分一样按网易云原来的顺序。"""
-    d, _ = _weapi("cloudsearch/get/web", {"s": q, "type": 1, "limit": 60, "offset": 0}, cookie=cookie())
+    arg = {"s": q, "type": 1, "limit": 60, "offset": 0}
+    d, _ = _weapi("cloudsearch/get/web", arg, cookie=cookie())
+    if d.get("code") != 200:   # 没登录时这个接口回 50000005（要登录）；电脑客户端那个不登录也给搜
+        d, _ = _weapi("cloudsearch/pc", arg, cookie=cookie())
     songs = [_song(t) for t in (d.get("result") or {}).get("songs") or []]
     toks = [t.lower() for t in q.split() if t.strip()]
     ql = q.lower()

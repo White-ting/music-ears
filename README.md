@@ -6,7 +6,11 @@ Let LLMs without ears see music
 
 让听不见声音的 AI "看见"一首歌：把歌拆开、量出来，写成一张给 AI 读的**乐谱卡**。
 
-> 作者在 macOS 上用；Linux、Windows 走 Docker 里的转码，测过转码那一步，整套流程还没在别的系统上从头跑过。**Windows 的一步一步安装：[docs/windows.md](docs/windows.md)。**
+> **在哪些系统上测过（2026-10-20）**：macOS（Apple 芯片）照教程从头走通；Linux（Ubuntu 24.04，虚拟机里当 VPS 测）从零装通、拆歌、播放器和 MCP 都能用；**Windows 还没在真机上跑过**（按 Windows 改过，没实测）。
+>
+> - **在 Aru 里用、给新手的完整教程**：[docs/教程-aru.md](docs/教程-aru.md)（从装 Docker 到在 Aru 里一起听，含放在 VPS 上的做法）。程序就是这个仓库：点绿色的 **Code → Download ZIP** 下载。国内打不开 GitHub 的，可以找发给你的人要打包好的 zip（里面有教程的网页版、给 AI 用的纯文字版和程序本身）。
+> - 只想在 Windows 上装：[docs/windows.md](docs/windows.md)。
+> - 放在国外的服务器上，网易云很多歌放不了（按 IP 限制海外），要用国内的。
 
 先看一眼：[乐谱卡长这样](docs/example-card.md)。最近改了什么：[更新说明](CHANGELOG.md)。
 
@@ -111,7 +115,7 @@ mkdir -p ~/.config/music-ears/keys
 - `~/.config/music-ears/keys/dashscope.key`：百炼的钥匙（听、认字）
 - `~/.config/music-ears/keys/gemini.key`：Gemini 的钥匙（审查）
 
-第一次量歌时会自动下载 Demucs 和 CREPE 的模型，放在本目录的 `models/`，大约 500MB。
+第一次量歌时会自动下载 Demucs 和 CREPE 的模型，放在本目录的 `models/`，大约 100MB。
 
 装好后跑一次 `music-ears doctor`，它会查 Docker、依赖、钥匙、网易云登录，缺什么告诉你怎么补。
 

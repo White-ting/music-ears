@@ -90,7 +90,7 @@ def main(a):
     models = os.path.join(HOME, "models")
     say(OK if os.path.isdir(models) and os.listdir(models) else WARN,
         "分轨、音高模型" + ("已下载" if os.path.isdir(models) and os.listdir(models) else "还没下载"),
-        "" if os.path.isdir(models) and os.listdir(models) else "第一次量歌时自动下载到 models/，约 500MB")
+        "" if os.path.isdir(models) and os.listdir(models) else "第一次量歌时自动下载到 models/，约 100MB")
 
     # 钥匙
     for name, what in (("listen", "听（模型听每一段）"), ("review", "审查（另一家模型重听核对）"), ("asr", "认字（只有 --sung 自己唱的才用）")):
