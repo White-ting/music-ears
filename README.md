@@ -79,7 +79,7 @@ music-ears serve
 
 浏览器打开 <http://127.0.0.1:8790/> 就是一个黑胶播放器：你的网易云歌单、搜索、全屏歌词、锁屏控制。点歌右边的「⋯」→「一起听」，这首会先拆成乐谱卡，然后开始放；放的过程中，AI 读 `http://127.0.0.1:8790/api/now?format=text` 就知道你放到哪一句，还附上乐谱卡里前后十秒的旋律、和弦、唱法。
 
-手机上用、嵌进你自己的聊天前端、接给 AI，见 [docs/player.md](docs/player.md)。
+手机上用、嵌进你自己的聊天前端、接给 AI，见 [docs/player.md](docs/player.md)。换颜色、唱片样式，见 [docs/skin.md](docs/skin.md)。
 
 ## 接给 AI（MCP）
 

@@ -40,6 +40,7 @@ WEB = os.path.join(HOME, "web")
 CACHE = os.path.join(HOME, "cache")
 COVERS = os.path.join(CACHE, "covers")
 CLI = os.path.join(HOME, "music-ears")
+SKIN = os.path.expanduser("~/.config/music-ears/skin.css")   # 自己的外观，见 docs/skin.md；没有就是默认样子
 STATIC = {"index.html": "text/html; charset=utf-8", "vinyl.js": "text/javascript; charset=utf-8",
           "vinyl.css": "text/css; charset=utf-8", "qrcode.min.js": "text/javascript; charset=utf-8"}
 
@@ -511,6 +512,12 @@ class H(BaseHTTPRequestHandler):
                 extra["Set-Cookie"] = "me_key=%s; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax" % q["key"][0]
             with open(os.path.join(WEB, p), "rb") as f:
                 return self.send(200, STATIC[p], f.read(), extra)
+        if method == "GET" and p == "skin.css":
+            css = b""
+            if os.path.isfile(SKIN):
+                with open(SKIN, "rb") as f:
+                    css = f.read(200000)
+            return self.send(200, "text/css; charset=utf-8", css)
         if p == "cover":
             return self.cover(q)
         if p == "api/vinyl":
