@@ -83,7 +83,7 @@ music-ears serve
 
 ## 接给 AI（MCP）
 
-`music-ears serve` 同时是一个 MCP 服务（`/mcp`）：搜歌、拆歌、读卡、一起听、点歌、给播放器换外观。Claude Code、Claude Desktop、Claude 手机 App 的自定义连接器、Aru 都能接，怎么接见 [docs/mcp.md](docs/mcp.md)。
+`music-ears serve` 同时是一个 MCP 服务（`/mcp`）：搜歌、拆歌、读卡、一起听、点歌、给播放器换外观。Claude Code、Claude Desktop、Claude 手机 App 的自定义连接器、Aru 都能接，怎么接见 [docs/mcp.md](docs/mcp.md)；**在 Aru 里用，一步一步见 [docs/aru.md](docs/aru.md)**。
 
 ## 需要什么
 

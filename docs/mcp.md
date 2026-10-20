@@ -53,7 +53,7 @@ Claude Desktop 在设置 → 开发者 → 编辑配置里加：
 2. 给它一个 HTTPS 地址。最省事的是 Cloudflare Tunnel：在 Cloudflare 的 Zero Trust → Networks → Tunnels 建一条隧道，在电脑上装好 cloudflared，公共主机名填一个子域名，服务填 `http://localhost:8790`。
 3. MCP 地址就是 `https://你的子域名/mcp?key=口令`。
    - **Claude App**：claude.ai 网页版 → 设置 → 连接器 → 添加自定义连接器，填这个地址。手机 App 会跟着账号同步。
-   - **Aru**：总设置 → 连接 → MCP，添加远程服务（streamable HTTP），填这个地址，测试连接后启用，再允许你的协作者使用，打开工具箱里的 MCP。
+   - **Aru**：总设置 → 连接 → MCP，添加远程服务（streamable HTTP），填这个地址，测试连接后启用，再允许你的协作者使用，打开工具箱里的 MCP。一步一步的教程（含播放器怎么当网页应用接）见 [aru.md](aru.md)。
 4. 播放器在手机上打开 `https://你的子域名/?key=口令`。Aru 里也可以在「应用与连接」把它当网页应用接进去。
 
 口令带在地址里，等于钥匙：别把这个地址发到群里、贴进截图。不想用了，换一个口令重开 serve，旧地址就失效了。

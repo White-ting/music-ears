@@ -13,6 +13,7 @@
 - **一起听有两种报进度的方式**：摘录 `window`（默认，每次附上前后十秒的乐谱卡）；书签 `book`（开始时把整张卡给 AI，之后只报第几句）。对比和选法见 [docs/mcp.md](docs/mcp.md)。
 - **AI 给你点歌**：MCP 新增 `play` 工具。默认排在正在放的那首后面，不打断你，屏幕下方会显示 AI 想说的一句话。
 - **Windows 能用了**：解决了中文乱码、路径和时区的问题。一步一步的安装说明见 [docs/windows.md](docs/windows.md)。
+- **在 Aru 里用的教程** [docs/aru.md](docs/aru.md)：MCP 接给 Aru 里的 AI，播放器当网页应用接给你自己，从设口令、开隧道到试一遍和排错。（还没在 Aru 里从头实测过，有对不上的请提 Issue。）
 - **`music-ears doctor`**：逐项检查有没有装好，包括 Python、Docker、测量要用的库、模型、钥匙、网易云登录。缺什么就告诉你怎么补。
 
 ### 修正

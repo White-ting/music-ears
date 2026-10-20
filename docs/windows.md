@@ -64,7 +64,7 @@ python music-ears 网易云歌曲链接
 ```
 第一次会下载约 500MB 的模型，之后一首 4 分钟的歌大约 6～8 分钟。做好会打印乐谱卡的位置。
 
-**接给 AI**（Aru、Claude 手机 App）：见 [mcp.md](mcp.md)。手机要连的话，要给 serve 设口令、再开一个 HTTPS 地址；已经给 Aru Host 建过 Cloudflare 隧道的，在同一条隧道里多加一个公共主机名就行（比如 `ears.你的域名` → `http://localhost:8790`）。
+**接给 AI**（Aru、Claude 手机 App）：见 [mcp.md](mcp.md)；Aru 照 [aru.md](aru.md) 一步一步来。手机要连的话，要给 serve 设口令、再开一个 HTTPS 地址；已经给 Aru Host 建过 Cloudflare 隧道的，在同一条隧道里多加一个公共主机名就行（比如 `ears.你的域名` → `http://localhost:8790`）。
 
 ## 模型钥匙（可选）
 
