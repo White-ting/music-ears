@@ -6,7 +6,7 @@ Let LLMs without ears see music
 
 让听不见声音的 AI "看见"一首歌：把歌拆开、量出来，写成一张给 AI 读的**乐谱卡**。
 
-> 作者在 macOS 上用；Linux、Windows 走 Docker 里的转码，测过转码那一步，整套流程还没在别的系统上从头跑过。
+> 作者在 macOS 上用；Linux、Windows 走 Docker 里的转码，测过转码那一步，整套流程还没在别的系统上从头跑过。**Windows 的一步一步安装：[docs/windows.md](docs/windows.md)。**
 
 先看一眼：[乐谱卡长这样](docs/example-card.md)。
 
@@ -112,6 +112,8 @@ mkdir -p ~/.config/music-ears/keys
 - `~/.config/music-ears/keys/gemini.key`：Gemini 的钥匙（审查）
 
 第一次量歌时会自动下载 Demucs 和 CREPE 的模型，放在本目录的 `models/`，大约 500MB。
+
+装好后跑一次 `music-ears doctor`，它会查 Docker、依赖、钥匙、网易云登录，缺什么告诉你怎么补。
 
 ## 设置
 

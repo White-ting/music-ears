@@ -97,9 +97,9 @@
     const sheet = root.querySelector('.mev-sheet'), mini = root.querySelector('.mev-mini'), toastEl = root.querySelector('.mev-toast');
 
     let toastT = 0;
-    function toast(msg) {
+    function toast(msg, ms) {
       toastEl.textContent = msg; toastEl.classList.add('on');
-      clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('on'), 2800);
+      clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('on'), ms || 2800);
     }
     async function api(op, arg) {
       const r = await fetch(B + 'api/vinyl?op=' + op + (arg != null ? '&arg=' + encodeURIComponent(arg) : ''), { cache: 'no-store', credentials: 'include' });
@@ -458,6 +458,33 @@
       mini.querySelector('.l').addEventListener('click', (e) => { e.stopPropagation(); mini.classList.remove('closing'); listen(S.queue[S.idx]); });
       document.addEventListener('pointerdown', (e) => { if (mini.classList.contains('closing') && !mini.contains(e.target)) mini.classList.remove('closing'); }, true);
     })();
+
+    /* AI 点的歌（MCP 的 play）：每 4 秒问一次。处理过的序号记在浏览器里，刷新页面不会重放同一首；
+       后端重启后序号从头数（靠 boot 认出来） */
+    const CK = opts.storageKey + '-cmd';
+    let seen = { boot: '', seq: 0 };
+    try { seen = Object.assign(seen, JSON.parse(localStorage.getItem(CK) || '{}')); } catch (e) {}
+    async function pollCmd() {
+      try {
+        const since = seen.boot ? seen.seq : 0;
+        const d = await (await fetch(B + 'api/cmd?since=' + since, { cache: 'no-store', credentials: 'include' })).json();
+        if (!d.ok) return;
+        if (d.boot !== seen.boot) { seen = { boot: d.boot, seq: 0 }; }
+        const c = d.cmd;
+        if (c && c.seq > seen.seq) {
+          const t = c.track, idle = S.idx < 0 || !S.queue[S.idx];
+          if (c.mode === 'now' || idle) {
+            const k = S.queue.findIndex(x => x.id === t.id);
+            if (k >= 0) playAt(k); else { S.queue.splice(S.idx + 1, 0, t); playAt(S.idx + 1); }
+            if (!$('lib').hidden) showLib(false);   // 停在歌单页的话切回播放页
+          } else queueOp(t, 'next');   // 排下一首：不打断她正在听的（暂停着也不替她按播放）
+          toast((c.note ? c.note + ' · ' : '') + '给你点了《' + t.name + '》' + (c.mode === 'now' || idle ? '' : '，排在下一首'), 6000);
+        }
+        seen.seq = Math.max(seen.seq, d.seq || 0);
+        try { localStorage.setItem(CK, JSON.stringify(seen)); } catch (e) {}
+      } catch (e) {}
+    }
+    pollCmd(); setInterval(pollCmd, 4000);
 
     load(); paintSong(); paintPlay();
     if (opts.open) open();

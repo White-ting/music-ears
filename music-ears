@@ -12,6 +12,7 @@
   music-ears show 关键词                      打印某首的乐谱卡（歌名、歌手、编号都能搜）
   music-ears login start | check KEY | me     网易云扫码登录（JSON）
   music-ears vinyl playlists | tracks 歌单 | url 歌 | lyric 歌 | search 关键词    给播放器用（JSON）
+  music-ears doctor [--quick]                 装好了没有：Docker、依赖、钥匙、网易云登录，缺什么说怎么补
   music-ears serve [--host 127.0.0.1] [--port 8790] [--token 口令]       黑胶播放器网页 + 一起听接口 + MCP（见 docs/player.md、docs/mcp.md）
 
 量的那步在 Docker 里跑（python:3.12-slim，挂上本目录的 venv 和 models）；听和审查调模型（src/listen.py）。
@@ -25,6 +26,11 @@ import subprocess
 import sys
 import time
 
+# Windows：默认编码不是 UTF-8，读写中文的 json、乐谱卡会乱码或报错。用 Python 的 UTF-8 模式把自己重跑一遍（子进程也跟着用）
+if os.name == "nt" and not sys.flags.utf8_mode:
+    os.environ["PYTHONUTF8"] = "1"
+    sys.exit(subprocess.call([sys.executable, "-X", "utf8"] + sys.argv))
+
 HOME = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(HOME, "src"))
 import card      # noqa: E402
@@ -34,9 +40,15 @@ import netease   # noqa: E402
 CONF = config.load()
 if CONF.get("tz"):   # 记录时间用的时区（config.json 的 tz；不写就是系统时区）
     os.environ["TZ"] = CONF["tz"]
-    time.tzset()
+    if hasattr(time, "tzset"):   # Windows 没有 tzset，时间按系统时区记
+        time.tzset()
 CACHE = os.path.join(HOME, "cache")
 DOCKER = CONF["docker"]
+
+
+def cpath(p):
+    """本机路径 → 容器里的路径（本目录挂在 /w）。Windows 的反斜杠要换成 /。"""
+    return "/w/" + os.path.relpath(p, HOME).replace(os.sep, "/")
 
 
 def to_wav(src, d):
@@ -46,7 +58,7 @@ def to_wav(src, d):
         subprocess.run(["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@44100", src, dst], check=True)
         return dst
     r = subprocess.run([DOCKER, "run", "--rm", "-v", HOME + ":/w", "python:3.12-slim", "/w/venv/bin/python", "/w/src/convert.py",
-                        "/w/" + os.path.relpath(src, HOME), "/w/" + os.path.relpath(dst, HOME)], capture_output=True, text=True)
+                        cpath(src), cpath(dst)], capture_output=True, text=True)
     if r.returncode:
         raise SystemExit("转音频格式时出错了：\n" + (r.stderr or r.stdout)[-600:])
     return dst
@@ -63,10 +75,9 @@ def listen_ready():
 
 
 def measure(d):
-    rel = os.path.relpath(d, HOME)
     r = subprocess.run([DOCKER, "run", "--rm", "-v", HOME + ":/w", "-e", "TORCH_HOME=/w/models/torch",
                         "-e", "NUMBA_CACHE_DIR=/w/models/numba", "python:3.12-slim",
-                        "/w/venv/bin/python", "/w/src/measure.py", "/w/" + rel], capture_output=True, text=True)
+                        "/w/venv/bin/python", "/w/src/measure.py", cpath(d)], capture_output=True, text=True)
     if r.returncode:
         raise SystemExit("量的时候出错了：\n" + (r.stderr or r.stdout)[-800:])
 
@@ -181,6 +192,9 @@ def main(a):
         except Exception as e:
             print(json.dumps({"ok": False, "error": str(e)[:120]}, ensure_ascii=False))
         return
+    if a[0] == "doctor":   # 装好了没有（src/doctor.py）
+        import doctor
+        sys.exit(doctor.main(a[1:]))
     if a[0] == "serve":   # 黑胶播放器：网页 + 接口（src/serve.py）
         import serve
         serve.main(a[1:])

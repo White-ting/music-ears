@@ -15,6 +15,7 @@
   GET  /api/listen?id=…                                       一起听的状态：making / ready / failed / none
   POST /api/pos {id, pos, dur, line, playing, ended|stop}      播放器报位置
   GET  /api/now[?format=text]                                 给 AI 的：现在放到哪 + 乐谱卡里前后十秒
+  GET  /api/cmd?since=序号                                     播放器问：AI 有没有点歌
   POST /mcp                                                   MCP（streamable HTTP，只回 JSON）：搜歌、拆歌、读卡、一起听
 """
 import hashlib
@@ -43,6 +44,9 @@ STATIC = {"index.html": "text/html; charset=utf-8", "vinyl.js": "text/javascript
 _direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # 网易云图床在国内，直连
 JOBS = {}     # 歌编号 → making / ready / failed
 NOW = {}      # 一起听的那首：{id, name, artists, pos, dur, line, playing, at, ended}
+CMD = {"seq": 0}   # AI 点的歌（MCP 的 play）：{seq, track, mode, note, at}；播放器问 /api/cmd 拿
+SEEN = {"at": 0}   # 播放器上次来问是什么时候（判断它开没开着）
+BOOT = "%x" % int(time.time())   # 这次启动的编号：重启后序号从 0 数，播放器靠它知道要重新数
 LOCK = threading.Lock()
 
 
@@ -190,6 +194,7 @@ MCP_INSTRUCTIONS = (
     "用户想跟你聊一首歌：先 search_song 找到编号；list_cards 看拆没拆过；没拆过 make_card（要 5–8 分钟，过几分钟再 get_card）。"
     "get_card 读整张卡，或者给 at（比如 1:20）只读那一段。"
     "用户在黑胶播放器里点了「一起听」时，now_playing 告诉你放到哪一句，以及乐谱卡里前后十秒的内容。"
+    "想给她点歌就用 play（默认排下一首，别随便打断她正在听的）。"
     "卡里的数字是脚本量的，滑音、合唱、童声会冒出不存在的调外音，拿不准就说拿不准。")
 
 MCP_TOOLS = [
@@ -206,6 +211,11 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"song": {"type": "string", "description": "网易云歌曲编号、链接，或 list_cards 里的文件夹名、歌名"},
                                                        "at": {"type": "string", "description": "只看这个时间附近，比如 1:20"},
                                                        "span": {"type": "integer", "description": "at 前后各几秒，默认 20"}},
+                     "required": ["song"]}},
+    {"name": "play", "description": "给用户点一首歌：放进她的黑胶播放器。mode=next（默认）排在正在放的后面，mode=now 马上切过去。note 是想对她说的一句话，播放器上会显示。播放器没开着的话，她下次打开时会收到。",
+     "inputSchema": {"type": "object", "properties": {"song": {"type": "string", "description": "网易云歌曲编号或链接"},
+                                                       "mode": {"type": "string", "enum": ["next", "now"], "description": "next 排下一首（默认），now 马上放"},
+                                                       "note": {"type": "string", "description": "点歌时想说的一句话（可以不写）"}},
                      "required": ["song"]}},
     {"name": "now_playing", "description": "一起听：用户在黑胶播放器里放到哪一句，附上乐谱卡里前后十秒的旋律、和弦、听感。没在一起听就说没有。",
      "inputSchema": {"type": "object", "properties": {}}},
@@ -289,6 +299,22 @@ def mcp_call(name, a):
         head = text.split("\n## 逐句", 1)[0].strip()
         win = window(os.path.join(d, "card.md"), at, span)
         return head + "\n\n## %s 前后 %d 秒\n" % (a["at"], span) + ("\n".join(win) if win else "（这段没有逐句内容）")
+    if name == "play":
+        import netease
+        sid = _sid(a.get("song"))
+        if not sid:
+            raise ValueError("要网易云歌曲编号或链接（先用 search_song 找编号）")
+        i = netease.info(sid)
+        track = {"id": sid, "name": i["name"], "artists": i.get("artists") or [], "album": i.get("album", ""),
+                 "cover": i.get("cover", ""), "dur": i.get("duration") or 0}
+        mode = "now" if a.get("mode") == "now" else "next"
+        with LOCK:
+            CMD.update(seq=CMD["seq"] + 1, track=track, mode=mode, note=str(a.get("note") or "")[:80], at=time.time())
+        open_ = time.time() - SEEN["at"] < 30
+        tail = "" if open_ else "（播放器现在没开着，她打开以后就会收到）"
+        if i.get("vip") and not cli_json("info", sid).get("login"):
+            tail += "（这首是会员歌，她没登录网易云的话只能放试听片段）"
+        return "点好了：《%s》— %s，%s。%s" % (i["name"], " / ".join(track["artists"]), "马上放" if mode == "now" else "排在下一首", tail)
     if name == "now_playing":
         info = now_info()
         return info["text"] if info else "现在没在一起听（用户要在黑胶播放器里点「一起听」）。"
@@ -435,6 +461,13 @@ class H(BaseHTTPRequestHandler):
                     NOW.update(pos=float(body.get("pos") or 0), dur=float(body.get("dur") or 0),
                                line=str(body.get("line") or "")[:80], playing=bool(body.get("playing")), at=time.time())
             return self.json({"ok": True, "together": True})
+        if p == "api/cmd":
+            SEEN["at"] = time.time()
+            since = int((q.get("since") or ["0"])[0] or 0)
+            with LOCK:
+                c = dict(CMD)
+            fresh = c.get("seq", 0) > since and time.time() - c.get("at", 0) < 1800   # 半小时前点的就算了
+            return self.json({"ok": True, "boot": BOOT, "seq": c.get("seq", 0), "cmd": {k: c[k] for k in ("seq", "track", "mode", "note")} if fresh else None})
         if p == "api/now":
             info = now_info()
             if (q.get("format") or [""])[0] == "text":

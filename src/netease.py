@@ -51,7 +51,8 @@ def info(sid):
     if not s:
         raise ValueError("网易云没有这首：" + sid)
     return {"id": sid, "name": s["name"], "artists": [a["name"] for a in s.get("artists", [])],
-            "album": (s.get("album") or {}).get("name", ""), "duration": round(s.get("duration", 0) / 1000, 1),
+            "album": (s.get("album") or {}).get("name", ""), "cover": (s.get("album") or {}).get("picUrl", ""),
+            "duration": round(s.get("duration", 0) / 1000, 1),
             "vip": s.get("fee") in (1, 4)}   # fee 1 会员、4 付费专辑；0/8 免费
 
 
