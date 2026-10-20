@@ -50,6 +50,8 @@ GET http://127.0.0.1:8790/api/now?format=text
   [0:57] 某句歌词（在这句） ｜ ……〕
 ```
 
+想要"先给整本、之后只报页码"的话，加 `&mode=book`：只回书签（第几句、卡里哪一行、这句歌词），整张卡你在一起听开始时用 `/api/card?dir=歌曲编号` 先给 AI。两种模式的对比见 [mcp.md](mcp.md)。
+
 不带 `format=text` 是 JSON（`state`、`pos`、`dur`、`line`、`window` 逐行、`text`）。没在一起听时 `now` 是 `null`；放完了 `state` 是 `ended`。
 
 怎么让 AI 每次都看到：

@@ -134,6 +134,7 @@ mkdir -p ~/.config/music-ears/keys
 - `docker`：docker 命令不在 PATH 里时写完整路径；
 - `tz`：记录时间用的时区，不写就是系统时区；
 - `models`：换模型、换接口地址、换钥匙文件。每项能写的字段见 `src/config.py`。
+- `serve.listen_mode`：一起听怎么报进度，`window`（默认，每次附前后十秒摘录）或 `book`（先给整张卡，之后只报书签），见 [docs/mcp.md](docs/mcp.md)。
 
 ## QQ 音乐、酷狗、Apple Music 等别的平台
 

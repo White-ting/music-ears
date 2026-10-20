@@ -14,7 +14,7 @@
   POST /api/listen {id, name, artists}                        一起听：拆过就 ready，没拆过就后台拆（making）
   GET  /api/listen?id=…                                       一起听的状态：making / ready / failed / none
   POST /api/pos {id, pos, dur, line, playing, ended|stop}      播放器报位置
-  GET  /api/now[?format=text]                                 给 AI 的：现在放到哪 + 乐谱卡里前后十秒
+  GET  /api/now[?format=text][&mode=window|book]             给 AI 的：现在放到哪 + 前后十秒摘录（window）或书签（book）
   GET  /api/cmd?since=序号                                     播放器问：AI 有没有点歌
   POST /mcp                                                   MCP（streamable HTTP，只回 JSON）：搜歌、拆歌、读卡、一起听
 """
@@ -132,8 +132,31 @@ def window(sid, pos, span=10, dur=0):
     return out
 
 
-def now_info():
-    """给 AI 的"现在放到哪"。没在一起听就 None。"""
+def listen_mode(want=None):
+    """一起听怎么报进度：window 每次附前后十秒摘录（默认）；book 先给整张卡、之后只报书签。
+    调用时给的优先，其次 config.json 的 "serve": {"listen_mode": "book"}。"""
+    m = (want or (config.load().get("serve") or {}).get("listen_mode") or "window").strip()
+    return m if m in ("window", "book") else "window"
+
+
+def bookmark(sid, pos, dur=0):
+    """书签：第几句、卡里哪一行。没有逐句就空。"""
+    got = card_sections(sid)
+    if not got or not got[1]:
+        return ""
+    lines = got[1]
+    for k, (t, text, _) in enumerate(lines):
+        end = lines[k + 1][0] if k + 1 < len(lines) else min(t + 8, dur or t + 8)
+        if t <= pos < end:
+            return "第 %d/%d 句（卡里 [%d:%02d] 那行）「%s」" % (k + 1, len(lines), int(t) // 60, int(t) % 60, text)
+        if pos < t:
+            return "第 %d 句之前的间奏（下一句是卡里 [%d:%02d]）" % (k + 1, int(t) // 60, int(t) % 60)
+    return "最后一句之后（尾奏）"
+
+
+def now_info(mode=None):
+    """给 AI 的"现在放到哪"。没在一起听就 None。mode：window / book，见 listen_mode。"""
+    mode = listen_mode(mode)
     with LOCK:
         x = dict(NOW)
     if not x:
@@ -159,11 +182,17 @@ def now_info():
     if not x.get("playing"):
         text += "（暂停着）"
     text += note
-    win = window(x["id"], pos, dur=x.get("dur") or 0)
-    if win:
-        text += "\n前后十秒（摘自乐谱卡）：\n" + "\n".join("  " + w for w in win)
-    return {"state": "playing" if x.get("playing") else "paused", "id": x["id"], "pos": round(pos, 1),
-            "dur": x.get("dur") or 0, "line": x.get("line") or "", "window": win, "text": text + "〕"}
+    win, mark = [], ""
+    if mode == "book":
+        mark = bookmark(x["id"], pos, x.get("dur") or 0)
+        if mark:
+            text += "\n书签：" + mark
+    else:
+        win = window(x["id"], pos, dur=x.get("dur") or 0)
+        if win:
+            text += "\n前后十秒（摘自乐谱卡）：\n" + "\n".join("  " + w for w in win)
+    return {"state": "playing" if x.get("playing") else "paused", "id": x["id"], "pos": round(pos, 1), "mode": mode,
+            "dur": x.get("dur") or 0, "line": x.get("line") or "", "window": win, "bookmark": mark, "text": text + "〕"}
 
 
 def start_job(sid):
@@ -193,7 +222,7 @@ MCP_INSTRUCTIONS = (
     "music-ears 把歌拆成给 AI 读的乐谱卡（调、拍速、和弦、逐句简谱、换气、长音、颤音，加上模型听的听感）。"
     "用户想跟你聊一首歌：先 search_song 找到编号；list_cards 看拆没拆过；没拆过 make_card（要 5–8 分钟，过几分钟再 get_card）。"
     "get_card 读整张卡，或者给 at（比如 1:20）只读那一段。"
-    "用户在黑胶播放器里点了「一起听」时，now_playing 告诉你放到哪一句，以及乐谱卡里前后十秒的内容。"
+    "用户在黑胶播放器里点了「一起听」时，now_playing 告诉你放到哪一句：book 模式第一次给整张卡、之后只给书签，window 模式每次附前后十秒摘录。"
     "想给她点歌就用 play（默认排下一首，别随便打断她正在听的）。"
     "卡里的数字是脚本量的，滑音、合唱、童声会冒出不存在的调外音，拿不准就说拿不准。")
 
@@ -217,8 +246,9 @@ MCP_TOOLS = [
                                                        "mode": {"type": "string", "enum": ["next", "now"], "description": "next 排下一首（默认），now 马上放"},
                                                        "note": {"type": "string", "description": "点歌时想说的一句话（可以不写）"}},
                      "required": ["song"]}},
-    {"name": "now_playing", "description": "一起听：用户在黑胶播放器里放到哪一句，附上乐谱卡里前后十秒的旋律、和弦、听感。没在一起听就说没有。",
-     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "now_playing", "description": "一起听：用户在黑胶播放器里放到哪一句。两种报法（mode）：window 每次附上乐谱卡里前后十秒的旋律、和弦、听感；book 这一轮第一次调用时给你整张乐谱卡，之后只报书签（第几句、卡里哪一行），你自己翻卡。不填就用设置里的默认。没在一起听就说没有。",
+     "inputSchema": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["window", "book"], "description": "window 摘录 / book 整本加书签"},
+                                                       "card": {"type": "boolean", "description": "book 模式下要不要再给一遍整张卡（比如你的对话被压缩过、卡丢了）"}}}},
 ]
 
 
@@ -316,8 +346,23 @@ def mcp_call(name, a):
             tail += "（这首是会员歌，她没登录网易云的话只能放试听片段）"
         return "点好了：《%s》— %s，%s。%s" % (i["name"], " / ".join(track["artists"]), "马上放" if mode == "now" else "排在下一首", tail)
     if name == "now_playing":
-        info = now_info()
-        return info["text"] if info else "现在没在一起听（用户要在黑胶播放器里点「一起听」）。"
+        mode = listen_mode(a.get("mode"))
+        info = now_info(mode)
+        if not info:
+            return "现在没在一起听（用户要在黑胶播放器里点「一起听」）。"
+        if mode == "book":
+            with LOCK:
+                first = not NOW.get("card_given")
+            path = card_path(info["id"])
+            if (first or a.get("card")) and path:
+                with LOCK:
+                    NOW["card_given"] = True
+                card = open(path, encoding="utf-8").read().strip()
+                return ("这一轮一起听的乐谱卡，整本给你；之后我只报书签（第几句、卡里哪一行），你翻到那一行看。\n\n%s\n\n%s"
+                        % (card, info["text"]))
+            if first and not path:
+                return info["text"] + "\n（乐谱卡还在拆，拆好以后再调一次 now_playing 就会给你整张卡）"
+        return info["text"]
     raise KeyError(name)
 
 
@@ -440,7 +485,7 @@ class H(BaseHTTPRequestHandler):
                     return self.json({"ok": False, "error": "要网易云歌曲编号"}, 400)
                 with LOCK:
                     NOW.clear()
-                    NOW.update(id=sid, name=str(body.get("name") or "")[:60], artists=[str(a)[:30] for a in (body.get("artists") or [])][:4])
+                    NOW.update(session=time.time(), card_given=False, id=sid, name=str(body.get("name") or "")[:60], artists=[str(a)[:30] for a in (body.get("artists") or [])][:4])
                 have = bool(card_path(sid))
                 if not have:
                     start_job(sid)
@@ -469,7 +514,7 @@ class H(BaseHTTPRequestHandler):
             fresh = c.get("seq", 0) > since and time.time() - c.get("at", 0) < 1800   # 半小时前点的就算了
             return self.json({"ok": True, "boot": BOOT, "seq": c.get("seq", 0), "cmd": {k: c[k] for k in ("seq", "track", "mode", "note")} if fresh else None})
         if p == "api/now":
-            info = now_info()
+            info = now_info((q.get("mode") or [None])[0])
             if (q.get("format") or [""])[0] == "text":
                 return self.send(200, "text/plain; charset=utf-8", ((info or {}).get("text") or "").encode())
             return self.json({"ok": True, "now": info})
