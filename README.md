@@ -8,7 +8,7 @@ Let LLMs without ears see music
 
 > 作者在 macOS 上用；Linux、Windows 走 Docker 里的转码，测过转码那一步，整套流程还没在别的系统上从头跑过。**Windows 的一步一步安装：[docs/windows.md](docs/windows.md)。**
 
-先看一眼：[乐谱卡长这样](docs/example-card.md)。
+先看一眼：[乐谱卡长这样](docs/example-card.md)。最近改了什么：[更新说明](CHANGELOG.md)。
 
 ## 适合什么场景
 
