@@ -541,7 +541,7 @@
             const k = S.queue.findIndex(x => x.id === t.id);
             if (k >= 0) playAt(k); else { S.queue.splice(S.idx + 1, 0, t); playAt(S.idx + 1); }
             if (!$('lib').hidden) showLib(false);   // 停在歌单页的话切回播放页
-          } else queueOp(t, 'next');   // 排下一首：不打断她正在听的（暂停着也不替她按播放）
+          } else queueOp(t, 'next');   // 排下一首：不打断正在听的（暂停着也不替人按播放）
           toast((c.note ? c.note + ' · ' : '') + '给你点了《' + t.name + '》' + (c.mode === 'now' || idle ? '' : '，排在下一首'), 6000);
         }
         seen.seq = Math.max(seen.seq, d.seq || 0);

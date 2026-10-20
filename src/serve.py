@@ -175,7 +175,7 @@ def now_info(mode=None):
         return {"state": "switched", "id": x["id"], "text": "〔一起听：%s换到别的歌了，%s这首的一起听结束〕" % (who, song)}
     if not x.get("at"):
         if card_path(x["id"]) and time.time() - x.get("session", time.time()) > 600:
-            return {"state": "unknown", "id": x["id"], "text": "〔一起听：%s的卡好了，但一直没收到%s的播放进度，不知道她听到哪了〕" % (song, who)}
+            return {"state": "unknown", "id": x["id"], "text": "〔一起听：%s的卡好了，但一直没收到%s的播放进度，不知道%s听到哪了〕" % (song, who, who)}
         return {"state": "starting", "id": x["id"], "text": "〔一起听：%s准备开始放%s〕" % (who, song)}
     pos, ago = x.get("pos") or 0, time.time() - x["at"]
     note = ""
@@ -278,8 +278,8 @@ MCP_INSTRUCTIONS = (
     "用户想跟你聊一首歌：先 search_song 找到编号；list_cards 看拆没拆过；没拆过 make_card（要 5–8 分钟，过几分钟再 get_card）。"
     "get_card 读整张卡，或者给 at（比如 1:20）只读那一段。"
     "用户在黑胶播放器里点了「一起听」时，now_playing 告诉你放到哪一句：book 模式第一次给整张卡、之后只给书签，window 模式每次附前后十秒摘录。"
-    "想给她点歌就用 play（默认排下一首，别随便打断她正在听的）。"
-    "她想换播放器的样子：先 skin_guide 看能改什么，再 set_skin 写一套（马上换上，播放器开着就实时变），list_skins / use_skin 换回以前的。"
+    "想给用户点歌就用 play（默认排下一首，别随便打断正在听的）。"
+    "用户想换播放器的样子：先 skin_guide 看能改什么，再 set_skin 写一套（马上换上，播放器开着就实时变），list_skins / use_skin 换回以前的。"
     "卡里的数字是脚本量的，滑音、合唱、童声会冒出不存在的调外音，拿不准就说拿不准。")
 
 MCP_TOOLS = [
@@ -297,7 +297,7 @@ MCP_TOOLS = [
                                                        "at": {"type": "string", "description": "只看这个时间附近，比如 1:20"},
                                                        "span": {"type": "integer", "description": "at 前后各几秒，默认 20"}},
                      "required": ["song"]}},
-    {"name": "play", "description": "给用户点一首歌：放进她的黑胶播放器。mode=next（默认）排在正在放的后面，mode=now 马上切过去。note 是想对她说的一句话，播放器上会显示。播放器没开着的话，她下次打开时会收到。",
+    {"name": "play", "description": "给用户点一首歌：放进对方的黑胶播放器。mode=next（默认）排在正在放的后面，mode=now 马上切过去。note 是想对对方说的一句话，播放器上会显示。播放器没开着的话，对方下次打开时会收到。",
      "inputSchema": {"type": "object", "properties": {"song": {"type": "string", "description": "网易云歌曲编号或链接"},
                                                        "mode": {"type": "string", "enum": ["next", "now"], "description": "next 排下一首（默认），now 马上放"},
                                                        "note": {"type": "string", "description": "点歌时想说的一句话（可以不写）"}},
@@ -413,9 +413,9 @@ def mcp_call(name, a):
         with LOCK:
             CMD.update(seq=CMD["seq"] + 1, track=track, mode=mode, note=str(a.get("note") or "")[:80], at=time.time())
         open_ = time.time() - SEEN["at"] < 30
-        tail = "" if open_ else "（播放器现在没开着，她打开以后就会收到）"
+        tail = "" if open_ else "（播放器现在没开着，对方打开以后就会收到）"
         if i.get("vip") and not cli_json("info", sid).get("login"):
-            tail += "（这首是会员歌，她没登录网易云的话只能放试听片段）"
+            tail += "（这首是会员歌，对方没登录网易云的话只能放试听片段）"
         return "点好了：《%s》— %s，%s。%s" % (i["name"], " / ".join(track["artists"]), "马上放" if mode == "now" else "排在下一首", tail)
     if name == "skin_guide":
         with open(os.path.join(HOME, "docs", "skin.md"), encoding="utf-8") as f:
@@ -436,7 +436,7 @@ def mcp_call(name, a):
         return msg + ("播放器开着，几秒内就变。" if open_ else "播放器现在没开着，下次打开就是这样。")
     if name == "list_skins":
         ns, cur = skin.names(), skin.active()
-        own = "（另外她自己写了 skin.css，一直叠在下面）" if os.path.isfile(skin.OWN) else ""
+        own = "（另外用户自己写了 skin.css，一直叠在下面）" if os.path.isfile(skin.OWN) else ""
         if not ns:
             return "还没存过外观，现在是默认样子。" + own
         return "\n".join(("● " if x == cur else "○ ") + x for x in ns) + "\n" + ("正在用：" + cur if cur else "现在是默认样子") + own
@@ -614,7 +614,7 @@ class H(BaseHTTPRequestHandler):
             sid = str(body.get("id") or "")
             with LOCK:
                 if NOW.get("id") and NOW.get("id") != sid and NOW.get("at") and body.get("playing") and not NOW.get("ended"):
-                    NOW["switched"] = True   # 一起听的那首放过了，现在在放别的：她换歌了
+                    NOW["switched"] = True   # 一起听的那首放过了，现在在放别的：换歌了
                 if NOW.get("id") != sid:
                     return self.json({"ok": True, "together": False})
                 if body.get("ended"):
