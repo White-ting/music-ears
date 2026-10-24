@@ -1,5 +1,8 @@
 music-ears 黑胶播放器：在 Aru 里和 TA 一起听歌
 
+原项目：https://github.com/White-ting/music-ears （有新版、遇到问题可以在 Issues 里问）
+权限：MIT 许可，可以自由使用、修改、转给别人；转的时候保留原作者署名和 LICENSE 文件。
+
 这个压缩包里有四样东西，先解压，再按下面的说明用。
 
 1. 教程.html  ← 主要看这个
