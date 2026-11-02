@@ -413,7 +413,7 @@
           if (box.hidden) return clearInterval(lTimer);
           try {
             const c = await get('op=check&qr=' + encodeURIComponent(d.key));
-            if (!c.ok) return;
+            if (!c.ok) { st.textContent = '问不到扫码结果：' + (c.error || '没回话') + '（播放器窗口里也有记录）'; return; }
             if (c.code === 803) {
               clearInterval(lTimer);
               const m2 = (await get('op=me')).me;
@@ -421,7 +421,8 @@
               qr.textContent = '✓'; S.plStack = []; if (!$('lib').hidden) renderLib();
             } else if (c.code === 800) { clearInterval(lTimer); st.textContent = '二维码过期了，关掉再开一次'; }
             else if (c.code === 802) st.textContent = '扫到了，在网易云里点"确认登录"';
-          } catch (e) {}
+            else if (c.code !== 801) st.textContent = '网易云回了 ' + c.code + '：' + (c.msg || '没说原因') + '（截图发给帮你装的人）';
+          } catch (e) { st.textContent = '问扫码结果时出错：' + e.message; }
         }, 2000);
       } catch (e) { st.textContent = '网易云没回话，等会儿再试'; }
     }

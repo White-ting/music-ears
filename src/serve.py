@@ -64,9 +64,14 @@ def cli(*args, timeout=40):
 
 def cli_json(*args, timeout=40):
     try:
-        return json.loads(cli(*args, timeout=timeout).stdout or "{}")
-    except (subprocess.TimeoutExpired, ValueError):
-        return {"ok": False, "error": "music-ears 没回话"}
+        r = cli(*args, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "music-ears 没回话（超时）"}
+    try:
+        return json.loads(r.stdout or "{}")
+    except ValueError:   # 子命令出错了：把报错的最后一行带上，排错时看得到
+        last = ((r.stderr or "").strip().splitlines() or [""])[-1][:200]
+        return {"ok": False, "error": "music-ears 没回话" + ("：" + last if last else "")}
 
 
 def card_path(sid):
@@ -606,8 +611,15 @@ class H(BaseHTTPRequestHandler):
         if p == "api/login":
             op = (q.get("op") or ["me"])[0]
             if op == "check":
-                return self.json(cli_json("login", "check", (q.get("qr") or q.get("key") or [""])[0]))
-            return self.json(cli_json("login", "start" if op == "start" else "me"))
+                r = cli_json("login", "check", (q.get("qr") or q.get("key") or [""])[0])
+                if r.get("code") != getattr(self.server, "last_qr", None) or not r.get("ok"):   # 状态变了才在窗口里记一行（排错用）
+                    self.server.last_qr = r.get("code")
+                    print("扫码登录：", r.get("code"), r.get("msg") or r.get("error") or "", flush=True)
+                return self.json(r)
+            r = cli_json("login", "start" if op == "start" else "me")
+            if not r.get("ok"):
+                print("扫码登录（%s）出错：" % op, r.get("error") or "", flush=True)
+            return self.json(r)
         if p == "api/cards":
             return self.json(cli_json("list", "--json"))
         if p == "api/card":
