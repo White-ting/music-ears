@@ -412,7 +412,7 @@
         lTimer = setInterval(async () => {
           if (box.hidden) return clearInterval(lTimer);
           try {
-            const c = await get('op=check&key=' + encodeURIComponent(d.key));
+            const c = await get('op=check&qr=' + encodeURIComponent(d.key));
             if (!c.ok) return;
             if (c.code === 803) {
               clearInterval(lTimer);

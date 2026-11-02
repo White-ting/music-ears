@@ -58,7 +58,7 @@ def to_wav(src, d):
         subprocess.run(["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@44100", src, dst], check=True)
         return dst
     r = subprocess.run([DOCKER, "run", "--rm", "-v", HOME + ":/w", "python:3.12-slim", "/w/venv/bin/python", "/w/src/convert.py",
-                        cpath(src), cpath(dst)], capture_output=True, text=True)
+                        cpath(src), cpath(dst)], capture_output=True, encoding="utf-8", errors="replace", env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     if r.returncode:
         raise SystemExit("转音频格式时出错了：\n" + (r.stderr or r.stdout)[-600:])
     return dst
@@ -77,7 +77,7 @@ def listen_ready():
 def measure(d):
     r = subprocess.run([DOCKER, "run", "--rm", "-v", HOME + ":/w", "-e", "TORCH_HOME=/w/models/torch",
                         "-e", "NUMBA_CACHE_DIR=/w/models/numba", "python:3.12-slim",
-                        "/w/venv/bin/python", "/w/src/measure.py", cpath(d)], capture_output=True, text=True)
+                        "/w/venv/bin/python", "/w/src/measure.py", cpath(d)], capture_output=True, encoding="utf-8", errors="replace", env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     if r.returncode:
         raise SystemExit("量的时候出错了：\n" + (r.stderr or r.stdout)[-800:])
 
@@ -119,7 +119,7 @@ def analyze(link=None, audio=None, name=None, sung=False, lrc=None, listen=True)
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"), ensure_ascii=False, indent=1)
     measure(d)
     if sung and (link or lrc):   # 自己唱的：听出唱的是哪几句、对上歌词，再量一遍（分轨有缓存，第二遍快）
-        r = subprocess.run([sys.executable, os.path.join(HOME, "src", "align.py"), d], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, os.path.join(HOME, "src", "align.py"), d], capture_output=True, encoding="utf-8", errors="replace", env=dict(os.environ, PYTHONIOENCODING="utf-8"))
         sys.stderr.write((r.stdout or r.stderr or "").strip()[-200:] + "\n")
         if os.path.exists(os.path.join(d, "lyric.aligned.lrc")):
             measure(d)
@@ -129,7 +129,7 @@ def analyze(link=None, audio=None, name=None, sung=False, lrc=None, listen=True)
         sys.stderr.write("这张卡只有测量、没有听感（%s）。\n" % why)
         json.dump({"skipped": why}, open(os.path.join(d, "listen.json"), "w", encoding="utf-8"), ensure_ascii=False)
     else:
-        r = subprocess.run([sys.executable, os.path.join(HOME, "src", "listen.py"), d], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, os.path.join(HOME, "src", "listen.py"), d], capture_output=True, encoding="utf-8", errors="replace", env=dict(os.environ, PYTHONIOENCODING="utf-8"))
         if r.returncode:
             sys.stderr.write("听感没做成：" + (r.stderr or r.stdout)[-300:] + "\n")
     return card.render(d), False

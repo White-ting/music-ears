@@ -7,7 +7,7 @@
 
 接口（都回 JSON，除了 /cover 和 /api/card）：
   GET  /api/vinyl?op=playlists|tracks|url|lyric|search&arg=…   网易云：歌单、歌、播放地址、歌词、搜索
-  GET  /api/login?op=start | check&key=… | me                网易云扫码登录
+  GET  /api/login?op=start | check&qr=… | me                网易云扫码登录
   GET  /cover?u=网易云图片地址&s=100|200|500|512               封面代取（有些环境直连网易云图床会卡住），缓存在 cache/covers
   GET  /api/cards                                             拆过的卡
   GET  /api/card?dir=文件夹名                                  某张卡全文（text/markdown）
@@ -56,7 +56,9 @@ LOCK = threading.Lock()
 
 
 def cli(*args, timeout=40):
-    r = subprocess.run([sys.executable, CLI] + list(args), capture_output=True, text=True, timeout=timeout)
+    # 子命令一律按 UTF-8 说话、按 UTF-8 读（11-02：Windows 中文系统默认是 GBK，网易云昵称带表情符号时子命令直接报错，扫码登录成了却显示"没回话"）
+    r = subprocess.run([sys.executable, CLI] + list(args), capture_output=True, encoding="utf-8", errors="replace",
+                       env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=timeout)
     return r
 
 
@@ -512,11 +514,12 @@ class H(BaseHTTPRequestHandler):
         tok = self.server.token
         if not tok:
             return True
-        got = (q.get("key") or [""])[0] or (self.headers.get("Authorization") or "").replace("Bearer ", "")
-        if not got:
-            c = http.cookies.SimpleCookie(self.headers.get("Cookie") or "")
-            got = c["me_key"].value if "me_key" in c else ""
-        return got == tok
+        # 地址里的 key、Authorization、cookie 里记的，任何一个对上就算（11-02：以前地址里有 key 就只认它，
+        # 扫码登录问状态时也带了个 key=二维码编号，设了口令时被当成口令对不上、回 401，网页上点了确认没反应）
+        c = http.cookies.SimpleCookie(self.headers.get("Cookie") or "")
+        got = [(q.get("key") or [""])[0], (self.headers.get("Authorization") or "").replace("Bearer ", ""),
+               c["me_key"].value if "me_key" in c else ""]
+        return tok in got
 
     def route(self, method):
         u = urllib.parse.urlsplit(self.path)
@@ -567,7 +570,7 @@ class H(BaseHTTPRequestHandler):
         if p == "api/login":
             op = (q.get("op") or ["me"])[0]
             if op == "check":
-                return self.json(cli_json("login", "check", (q.get("key") or [""])[0]))
+                return self.json(cli_json("login", "check", (q.get("qr") or q.get("key") or [""])[0]))
             return self.json(cli_json("login", "start" if op == "start" else "me"))
         if p == "api/cards":
             return self.json(cli_json("list", "--json"))
