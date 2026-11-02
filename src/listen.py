@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
+import songmap  # noqa: E402
 
 SEG_MAX = 32      # 一段最长多少秒
 WHO = ""
@@ -54,6 +55,13 @@ def segments(m):
                 segs.append(cur)
             cur["lines"].append(l)
             cur["end"] = end
+        for p in songmap.song_map(m):   # 10-24：前奏、间奏、尾奏也听（按人声有无量的，跟模型分段无关）
+            if not p["lines"]:
+                a = p["start"]
+                while a < p["end"] - 3:
+                    segs.append({"start": a, "end": min(p["end"], a + SEG_MAX), "lines": [], "kind": p["kind"]})
+                    a += SEG_MAX
+        segs.sort(key=lambda x: x["start"])
     else:
         for s in m["sections"]:
             a = s["start"]
@@ -180,6 +188,8 @@ def facts(seg):
         if l["loudness_db"] is not None:
             bits.append("响度 %.0f dB" % l["loudness_db"])
         out.append("[%s] %s ｜ %s" % (mmss(l["t"]), l["text"], "；".join(bits)))
+    if not out and seg.get("kind"):
+        return "（这段是%s，没有在唱（可能有念白、和声、哼唱，听到了就说）。请重点描述伴奏：用了什么乐器、节奏和律动、情绪，和前后唱的部分怎么衔接）" % seg["kind"]
     return "\n".join(out) or "（这段没有歌词，可能是前奏、间奏或尾奏）"
 
 
@@ -234,7 +244,27 @@ def overall(c, segs, heard, m, title):
     return ask(c, None, q).strip()
 
 
-def main(d):
+def label_map(d, m, c):
+    """唱的部分按歌词分主歌、副歌……（songmap.LABEL_Q），存 map.json。听的模型不行就用审查的模型。
+    纯文字一问，几秒。没歌词或者都失败就不写，写卡时退回按歌词重复推。"""
+    q = songmap.label_prompt(m)
+    if not q:
+        return None
+    for which in ("listen", "review"):
+        try:
+            raw = ask(c[which], None, q, timeout=90)
+        except Exception:
+            continue
+        lab = songmap.parse_labels(m, raw)
+        if lab:
+            out = {"model": c[which]["model"], "labels": {str(t): k for t, k in lab.items()}}
+            json.dump(out, open(os.path.join(d, "map.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+            return out
+    return None
+
+
+def main(d, only_new=False):
+    """only_new：老歌升级用（music-ears remap）——已经听过的段不重听，只补没听过的（前奏、间奏、尾奏），再做一次分段。"""
     m = json.load(open(os.path.join(d, "measure.json"), encoding="utf-8"))
     meta = json.load(open(os.path.join(d, "meta.json"), encoding="utf-8"))
     title = meta.get("name") or "这首歌"
@@ -242,14 +272,26 @@ def main(d):
     WHO = "%s（不是原唱歌手，是用户本人）唱的" % config.name() if meta.get("source") == "sung" else ""
     wav = os.path.join(d, "audio.wav")
     c = conf()
+    label_map(d, m, c)
     segs = segments(m)
+    old = None
+    if only_new and os.path.exists(os.path.join(d, "listen.json")):
+        old = json.load(open(os.path.join(d, "listen.json"), encoding="utf-8"))
+        have = {(round(x["start"], 1), round(x["end"], 1)) for x in old.get("segments") or []}
+        segs = [s for s in segs if s.get("kind") and (round(s["start"], 1), round(s["end"], 1)) not in have]
     t0 = time.time()
 
     def safe(s):
         try:
             return listen_seg(c["listen"], wav, s, m, title)
         except Exception as e:
-            return {"error": str(e)[:120]}
+            try:   # 10-24：听的那家整个连不上（百炼账号停了）时换审查那家来听，标上是谁听的
+                h = listen_seg(c["review"], wav, s, m, title)
+                if isinstance(h, dict):
+                    h["by"] = c["review"]["model"]
+                return h
+            except Exception:
+                return {"error": str(e)[:120]}
     with ThreadPoolExecutor(4) as ex:
         heard = list(ex.map(safe, segs))
     t1 = time.time()
@@ -267,14 +309,21 @@ def main(d):
     t2 = time.time()
     # 有一段没听成就不做总结：试过两段都没听成时，模型照样写出有模有样的总结——是编的
     summary = ""
-    if heard and all(isinstance(h, dict) and "error" not in h and "raw" not in h for h in heard):
+    if old is None and heard and all(isinstance(h, dict) and "error" not in h and "raw" not in h for h in heard):
         try:
             summary = overall(c["listen"], segs, heard, m, title)
         except Exception:
             pass
+    new = [dict({"start": s["start"], "end": s["end"], "lines": [l["t"] for l in s["lines"]], "heard": h, "review": r},
+                **({"kind": s["kind"]} if s.get("kind") else {}))
+           for s, h, r in zip(segs, heard, reviews)]
+    if old is not None:   # 升级：补进原来的，总结照旧
+        old["segments"] = sorted(old["segments"] + new, key=lambda x: x["start"])
+        json.dump(old, open(os.path.join(d, "listen.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        print("补听了 %d 段（前奏、间奏、尾奏）" % len(new))
+        return
     out = {"listen_model": c["listen"]["model"], "review_model": c["review"]["model"],
-           "segments": [{"start": s["start"], "end": s["end"], "lines": [l["t"] for l in s["lines"]], "heard": h, "review": r}
-                        for s, h, r in zip(segs, heard, reviews)],
+           "segments": new,
            "summary": summary,
            "seconds": {"listen": round(t1 - t0), "review": round(t2 - t1)}}
     json.dump(out, open(os.path.join(d, "listen.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -284,4 +333,4 @@ def main(d):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], only_new="--only-new" in sys.argv)

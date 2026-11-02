@@ -356,6 +356,10 @@ def main(d):
         "key": key,
         "vocal_range": [note_name(min(voiced)), note_name(max(voiced))] if voiced else None,
         "sections": sections(y, sr),
+        # 10-24 段落地图要用：前奏、间奏、尾奏里也能写和弦走向和响度（以前只存了每句歌词范围里的和弦）
+        "beat_chords": [[round(float(bt), 2), c] for bt, c in zip(beat_t, chords)],
+        "loud_by_sec": [round(float(np.mean(loud[(loud_t >= k) & (loud_t < k + 1)])), 1) if ((loud_t >= k) & (loud_t < k + 1)).any() else None
+                        for k in range(int(dur) + 1)],
         "lines": lines,
         "notes": notes,
     }

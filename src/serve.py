@@ -112,13 +112,34 @@ def card_sections(sid):
     return parts, lines
 
 
-def window(sid, pos, span=10, dur=0):
+def card_map(path):
+    """卡里「### 段落名（m:ss–m:ss…）」那些小标题 → [(开始秒, 结束秒, 段落名)]。老卡没有就是空的。"""
+    out = []
+    for ln in open(path, encoding="utf-8").read().splitlines():
+        mm = re.match(r"^### (\S+?)（(\d+):(\d+)–(\d+):(\d+)", ln)
+        if mm:
+            out.append((int(mm.group(2)) * 60 + int(mm.group(3)), int(mm.group(4)) * 60 + int(mm.group(5)), mm.group(1)))
+    return out
+
+
+def window(sid, pos, span=10, dur=0, rng=None):
     """放到的那个点前后十秒，从乐谱卡里摘：这几句的旋律、音域、听感，加上那一段的整体听感。"""
     got = card_sections(sid)
     if not got:
         return []
     parts, lines = got
     out = []
+    path = sid if str(sid).endswith("card.md") else card_path(sid)
+    mp = card_map(path) if path else []
+    fmt = lambda p: "%s（%d:%02d–%d:%02d）" % (p[2], p[0] // 60, p[0] % 60, p[1] // 60, p[1] % 60)
+    if rng:   # 10-24：取一段时，列出这段跨了哪几个段落
+        hit = [p for p in mp if p[0] < rng[1] and p[1] > rng[0]]
+        if hit:
+            out.append("这段包括：" + "、".join(fmt(p) for p in hit))
+    else:     # 一起听：先说现在在哪一段（前奏、主歌2、副歌……）
+        sec = next((p for p in mp if p[0] <= pos < p[1]), None)
+        if sec:
+            out.append("现在在：" + fmt(sec))
     part = next((p for p in parts if p[0] <= pos < p[1]), None)
     if part:
         out.append("这一段的听感：" + part[2][:160])
@@ -133,7 +154,7 @@ def window(sid, pos, span=10, dur=0):
             if x.startswith("旋律："):
                 notes = x[3:].split()
                 bits.append("旋律 " + " ".join(notes[:20]) + (" …" if len(notes) > 20 else ""))
-            elif x.startswith(("音域：", "听：", "长音")):
+            elif x.startswith(("音域：", "听：", "长音", "和弦：")):
                 bits.append(x.replace("：", " ", 1)[:60])
         out.append("[%d:%02d] %s%s ｜ %s" % (int(t) // 60, int(t) % 60, text, here, " ｜ ".join(bits)))
     return out
@@ -278,7 +299,7 @@ MCP_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 MCP_INSTRUCTIONS = (
     "music-ears 把歌拆成给 AI 读的乐谱卡（调、拍速、和弦、逐句简谱、换气、长音、颤音，加上模型听的听感）。"
     "用户想跟你聊一首歌：先 search_song 找到编号；list_cards 看拆没拆过；没拆过 make_card（要 5–8 分钟，过几分钟再 get_card）。"
-    "get_card 读整张卡，或者给 at（比如 1:20）只读那一段。"
+    "get_card 先给 map=true 看全曲摘要和段落地图（前奏、主歌、副歌、间奏在几分几秒），再给 start/end 读想聊的那段；也可以读整张。"
     "用户在黑胶播放器里点了「一起听」时，now_playing 告诉你放到哪一句：book 模式第一次给整张卡、之后只给书签，window 模式每次附前后十秒摘录。"
     "想给用户点歌就用 play（默认排下一首，别随便打断正在听的）。"
     "用户想换播放器的样子：先 skin_guide 看能改什么，再 set_skin 写一套（马上换上，播放器开着就实时变），list_skins / use_skin 换回以前的。"
@@ -294,8 +315,13 @@ MCP_TOOLS = [
     {"name": "make_card", "description": "开始拆一首歌、写乐谱卡。要 5–8 分钟，立刻返回；过几分钟用 get_card 看好了没有。",
      "inputSchema": {"type": "object", "properties": {"song": {"type": "string", "description": "网易云歌曲编号或链接"}},
                      "required": ["song"]}},
-    {"name": "get_card", "description": "读一首歌的乐谱卡。不给 at 就是整张；给 at（比如 \"1:20\" 或秒数）只回卡头和那个时间前后 span 秒的逐句。",
+    {"name": "get_card", "description": "读一首歌的乐谱卡。什么都不给就是整张；map=true 只回卡头（全曲摘要和段落地图：前奏、主歌、副歌、间奏……在几分几秒）；"
+                                        "给 start/end（比如 \"1:20\"、\"1:50\"，一次最多两分钟）回卡头和这一段的逐句；给 at 回那个时间前后 span 秒。"
+                                        "建议先 map=true 看全貌，再按段落的时间取想聊的那段。",
      "inputSchema": {"type": "object", "properties": {"song": {"type": "string", "description": "网易云歌曲编号、链接，或 list_cards 里的文件夹名、歌名"},
+                                                       "map": {"type": "boolean", "description": "只要卡头和段落地图"},
+                                                       "start": {"type": "string", "description": "从哪儿开始，比如 1:20"},
+                                                       "end": {"type": "string", "description": "到哪儿，比如 1:50（不给就是 start 后 30 秒）"},
                                                        "at": {"type": "string", "description": "只看这个时间附近，比如 1:20"},
                                                        "span": {"type": "integer", "description": "at 前后各几秒，默认 20"}},
                      "required": ["song"]}},
@@ -397,10 +423,20 @@ def mcp_call(name, a):
                 raise ValueError("这首没拆成（看跑 music-ears serve 的那个窗口里的报错）")
             raise ValueError("没有这首的卡：先 make_card")
         text = open(os.path.join(d, "card.md"), encoding="utf-8").read()
+        head = text.split("\n## 逐句", 1)[0].strip()
+        if a.get("map"):   # 10-24：只要卡头（全曲摘要 + 段落地图），先看全貌再按段深入
+            return head
+        if a.get("start") or a.get("end"):   # 10-24：按起止时间取一段
+            st = _secs(a.get("start") or 0)
+            en = _secs(a["end"]) if a.get("end") else st + 30
+            if en <= st:
+                raise ValueError("end 要比 start 晚")
+            en = min(en, st + 120)   # 一次最多两分钟，免得又回整张
+            win = window(os.path.join(d, "card.md"), (st + en) / 2, (en - st) / 2, rng=(st, en))
+            return head + "\n\n## %s–%s\n" % (a.get("start") or "0:00", a.get("end") or "+30 秒") + ("\n".join(win) if win else "（这段没有逐句内容）")
         if not a.get("at"):
             return text
         at, span = _secs(a["at"]), int(a.get("span") or 20)
-        head = text.split("\n## 逐句", 1)[0].strip()
         win = window(os.path.join(d, "card.md"), at, span)
         return head + "\n\n## %s 前后 %d 秒\n" % (a["at"], span) + ("\n".join(win) if win else "（这段没有逐句内容）")
     if name == "play":

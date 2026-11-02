@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
+import songmap  # noqa: E402
 
 
 def mmss(t):
@@ -44,8 +45,20 @@ def render(d):
         "- 拍速：约 %s BPM%s" % (m["tempo_bpm"], "（自己唱的，节奏随性、录音也短，仅供参考）" if meta.get("source") == "sung" else ""),
         "- 整体音准：人声比标准音高%s（量音符前已整体校正）" % ("偏高 %d 音分" % m["tuning_cents"] if m.get("tuning_cents", 0) > 0 else "偏低 %d 音分" % -m["tuning_cents"] if m.get("tuning_cents", 0) < 0 else "基本没偏"),
         "- 人声音域：%s" % (" – ".join(m["vocal_range"]) if m.get("vocal_range") else "没量到人声"),
-        "- 结构（按声音相似度切的，同一个字母 = 同一段重复）：" + " ".join("%s(%s)" % (s["label"], mmss(s["start"])) for s in m["sections"]),
     ]
+    # 段落地图（10-24）：前奏、间奏、尾奏按人声有无量；唱的部分有 map.json（模型按歌词分的）就用它，没有就按歌词重复推
+    mp = None
+    if os.path.exists(os.path.join(d, "map.json")):
+        mp = json.load(open(os.path.join(d, "map.json"), encoding="utf-8"))
+    labels = {float(t): k for t, k in (mp or {}).get("labels", {}).items()} or None
+    parts = songmap.song_map(m, labels)
+    if m["lines"]:
+        how = ("主歌、副歌这些是 %s 按歌词分的" % mp["model"]) if labels else "主歌、副歌这些是脚本按歌词重复推的"
+        out.append("- 段落地图：%s（前奏、间奏、尾奏是按人声有没有在唱量的；%s，是推断，不一定准）" % (songmap.map_line(parts), how))
+    else:
+        out.append("- 段落地图（没有歌词，按声音相似度切的，同一个字母 = 听起来像同一段）：%s" % songmap.map_line(parts))
+    if m["lines"]:
+        out.append("- 声音相似度切分（参考，同一个字母 = 听起来像同一段，切得碎）：" + " ".join("%s(%s)" % (s["label"], mmss(s["start"])) for s in m["sections"]))
     lis = None
     if os.path.exists(os.path.join(d, "listen.json")):
         lis = json.load(open(os.path.join(d, "listen.json"), encoding="utf-8"))
@@ -60,12 +73,16 @@ def render(d):
     if not m.get("lyric_aligned"):
         out.append("- 歌词没对上（录音多半是从歌中间开始的），下面只有旋律，没有逐句歌词")
     out += ["", "怎么读：旋律是简谱唱名（1–7，#/b 是升降），' 是高八度、, 是低八度；数字是脚本量的，"
-            "滑音有时会被切成一个短音，所以偶尔冒出的调外音不一定真唱了。〔听感〕是模型听的（不报数字），另一家模型逐段重听审查过。", ""]
+            "滑音有时会被切成一个短音，所以偶尔冒出的调外音不一定真唱了。〔听感〕是模型听的（不报数字），另一家模型逐段重听审查过。"
+            "「###」开头的行是段落（见卡头的段落地图）；前奏、间奏、尾奏是没有在唱的地方，听感写的主要是伴奏。", ""]
     seg_at = {}       # 每段从哪句开始 → 那段
     line_note = {}    # 每句的听感点评
+    inst_segs = []    # 前奏、间奏、尾奏听的那几段
     if lis:
         for sg in lis.get("segments") or []:
-            if sg["lines"]:
+            if sg.get("kind"):
+                inst_segs.append(sg)
+            elif sg["lines"]:
                 seg_at[sg["lines"][0]] = sg
             for x in (sg["heard"].get("lines") or []) if isinstance(sg["heard"], dict) else []:
                 if isinstance(x, dict) and x.get("note"):
@@ -73,7 +90,30 @@ def render(d):
     if m["lines"]:
         out.append("## 逐句")
         out.append("")
+        head_at = {p["lines"][0]: p for p in parts if p["lines"]}
+        inst = [p for p in parts if not p["lines"]]
+
+        def inst_block(p):
+            out.append("### %s（%s–%s，没有在唱）" % (p["kind"], mmss(p["start"]), mmss(p["end"])))
+            for sg in inst_segs:
+                if p["start"] - 1 <= sg["start"] < p["end"]:
+                    out.append(seg_block(sg))
+            out.append("[%s] （%s，没有在唱）" % (mmss(p["start"]), p["kind"]))
+            bits = []
+            if p.get("chords"):
+                bits.append("和弦：" + " ".join(p["chords"]))
+            if p.get("loudness_db") is not None:
+                bits.append("响度 %.0f dB" % p["loudness_db"])
+            if bits:
+                out.append("    " + "　".join(bits))
+            out.append("")
+
         for l in m["lines"]:
+            while inst and inst[0]["start"] <= l["t"]:
+                inst_block(inst.pop(0))
+            if l["t"] in head_at:
+                p = head_at[l["t"]]
+                out.append("### %s（%s–%s）" % (p["kind"], mmss(p["start"]), mmss(p["end"])))
             sg = seg_at.get(l["t"])
             if sg:
                 out.append(seg_block(sg))
@@ -92,6 +132,8 @@ def render(d):
                 out.append("    " + "；".join(notes))
             if line_note.get(mmss(l["t"])):
                 out.append("    听：" + line_note[mmss(l["t"])])
+        for p in inst:
+            inst_block(p)
         out.append("")
     else:
         out.append("## 旋律（没有歌词，按时间）")

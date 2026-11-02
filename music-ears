@@ -12,6 +12,7 @@
   music-ears show 关键词                      打印某首的乐谱卡（歌名、歌手、编号都能搜）
   music-ears login start | check KEY | me     网易云扫码登录（JSON）
   music-ears vinyl playlists | tracks 歌单 | url 歌 | lyric 歌 | search 关键词    给播放器用（JSON）
+  music-ears remap [文件夹名|all] [--no-listen]  老卡升级（10-24 起的卡有段落地图）：不重新拆，只补分段、前奏间奏尾奏的听感，再重写卡
   music-ears doctor [--quick]                 装好了没有：Docker、依赖、钥匙、网易云登录，缺什么说怎么补
   music-ears serve [--host 127.0.0.1] [--port 8790] [--token 口令]       黑胶播放器网页 + 一起听接口 + MCP（见 docs/player.md、docs/mcp.md）
 
@@ -198,6 +199,23 @@ def main(a):
     if a[0] == "serve":   # 黑胶播放器：网页 + 接口（src/serve.py）
         import serve
         serve.main(a[1:])
+        return
+    if a[0] == "--remeasure-dir":   # 给 test/regress.py 用：只重新量这个文件夹（不听、不写卡）
+        measure(a[1])
+        return
+    if a[0] == "remap":   # 老卡升级：段落地图 + 补听前奏、间奏、尾奏，不重新量
+        want = [x for x in a[1:] if not x.startswith("--")]
+        dirs = [os.path.dirname(m) for _, _, m in cards()] if not want or want == ["all"] else [os.path.join(CACHE, x) for x in want]
+        for d in dirs:
+            if not os.path.exists(os.path.join(d, "measure.json")):
+                print("跳过（还没量过）：" + os.path.basename(d))
+                continue
+            lis = os.path.join(d, "listen.json")
+            if "--no-listen" not in a and os.path.exists(lis) and not json.load(open(lis, encoding="utf-8")).get("skipped") and not listen_ready():
+                r = subprocess.run([sys.executable, os.path.join(HOME, "src", "listen.py"), d, "--only-new"], capture_output=True, encoding="utf-8", errors="replace", env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+                print(os.path.basename(d), (r.stdout.strip().splitlines() or ["（补听没输出）"])[-1], (r.stderr.strip().splitlines() or [""])[-1][:120])
+            card.render(d)
+            print("重写好了：" + os.path.join(d, "card.md"))
         return
     if a[0] == "list":   # --json：给网页用
         rows = [{"dir": os.path.basename(os.path.dirname(path)), "made": made, "name": meta.get("name", ""),
